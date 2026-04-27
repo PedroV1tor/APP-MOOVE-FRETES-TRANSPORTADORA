@@ -88,9 +88,7 @@ export function ChatScreen() {
 
         if (pSource === 'freight' || pSource === 'route') {
           await supabase.from('conversations').update({
-            // TODO: Remove source:'direct' bypass once the Postgres trigger
-            // "column 'origin' does not exist" bug is fixed in the DB migration.
-            source: 'direct',
+            source: pSource,
             source_id: sourceId || null,
             freight_id: pSource === 'freight' ? sourceId : null,
             origin_city: pOriginCity || null,
@@ -104,14 +102,12 @@ export function ChatScreen() {
         return conv.id;
       }
 
-      // TODO: Replace source:'direct' with the real source value once the Postgres
-      // trigger bug ("column 'origin' does not exist") is fixed server-side.
       const { data: created, error } = await supabase
         .from('conversations')
         .insert({
           participant1_id: user.id,
           participant2_id: otherUserId,
-          source: 'direct',
+          source: pSource || 'direct',
           source_id: sourceId || null,
           freight_id: pSource === 'freight' ? sourceId : null,
           origin_city: pOriginCity || null,
@@ -137,7 +133,7 @@ export function ChatScreen() {
     } finally {
       isCreatingConversationRef.current = false;
     }
-  }, [user, otherUserId, conversationId, source, sourceId, originCity, originState, destinationCity, destinationState]);
+  }, [user, otherUserId, conversationId, pSource, sourceId, pOriginCity, pOriginState, pDestinationCity, pDestinationState]);
 
   async function handlePinConversation() {
     if (!conversationId) return;

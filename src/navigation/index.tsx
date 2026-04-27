@@ -10,6 +10,7 @@ import { COLORS } from '../utils/constants';
 import { navigationRef } from './navigationRef';
 
 import { LoginScreen } from '../screens/auth/LoginScreen';
+import { SignUpScreen } from '../screens/auth/SignUpScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { FreightsScreen } from '../screens/FreightsScreen';
 import { FreightDetailScreen } from '../screens/FreightDetailScreen';
@@ -20,6 +21,7 @@ import { ChatListScreen } from '../screens/ChatListScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
+import { SettingsScreen } from '../screens/SettingsScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -137,9 +139,13 @@ export function AppNavigator() {
             <Stack.Screen name="DriverDetail"    component={DriverDetailScreen} />
             <Stack.Screen name="Chat"            component={ChatScreen} />
             <Stack.Screen name="Notifications"   component={NotificationsScreen} />
+            <Stack.Screen name="Settings"        component={SettingsScreen} />
           </>
         ) : (
-          <Stack.Screen name="Login" component={LoginScreen} />
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="SignUp" component={SignUpScreen} />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>

@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { COLORS } from '../../utils/constants';
@@ -12,6 +13,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function LoginScreen() {
   const { signIn } = useAuth();
+  const navigation = useNavigation<any>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -77,7 +79,7 @@ export function LoginScreen() {
           <Image source={require('../../../assets/logo.png')} style={styles.logoImage} resizeMode="contain" />
 
           <View style={styles.form}>
-          <Text style={styles.welcome}>Área do Motorista</Text>
+          <Text style={styles.welcome}>Área da Transportadora</Text>
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>E-mail</Text>
@@ -148,6 +150,10 @@ export function LoginScreen() {
                 <Text style={styles.loginBtnText}>Entrar</Text>
               </>
             )}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.signUpLink} onPress={() => navigation.navigate('SignUp')}>
+            <Text style={styles.signUpLinkText}>Não tem conta? <Text style={{ fontWeight: '700', color: COLORS.primary }}>Criar Conta</Text></Text>
           </TouchableOpacity>
           </View>
         </View>
@@ -232,6 +238,14 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  signUpLink: {
+    alignSelf: 'center',
+    paddingVertical: 8,
+  },
+  signUpLinkText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
   },
   footer: {
     textAlign: 'center',

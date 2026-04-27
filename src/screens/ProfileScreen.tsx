@@ -5,6 +5,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
+import { decode } from 'base64-arraybuffer';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { COLORS } from '../utils/constants';
@@ -12,8 +15,10 @@ import { getSupabaseAvatarUrl, formatPhone } from '../utils/helpers';
 
 export function ProfileScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<any>();
   const { user, signOut, refreshCompany } = useAuth();
   const [showEditModal, setShowEditModal] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const company = user?.company;
   const profile = user?.profile;
@@ -24,6 +29,53 @@ export function ProfileScreen() {
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Sair', style: 'destructive', onPress: signOut },
     ]);
+  }
+
+  async function handlePickAvatar() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permissão necessária', 'Precisamos de acesso à galeria para alterar a foto.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+      base64: true,
+    });
+
+    if (result.canceled || !result.assets[0]?.base64) return;
+
+    setUploadingAvatar(true);
+    try {
+      const base64 = result.assets[0].base64;
+      const ext = result.assets[0].uri.split('.').pop() || 'jpg';
+      const filePath = `${user?.id}/avatar.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, decode(base64), {
+          contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}`,
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Atualizar profile e company com a URL
+      await Promise.all([
+        supabase.from('profiles').update({ avatar_url: filePath }).eq('id', user?.id),
+        supabase.from('companies').update({ logo: filePath }).eq('user_id', user?.id),
+      ]);
+
+      await refreshCompany();
+      Alert.alert('Sucesso', 'Foto atualizada com sucesso!');
+    } catch (err: any) {
+      Alert.alert('Erro', err.message || 'Falha ao enviar foto.');
+    } finally {
+      setUploadingAvatar(false);
+    }
   }
 
   return (
@@ -42,13 +94,22 @@ export function ProfileScreen() {
         {/* Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.profileTop}>
-            {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={styles.avatar} />
-            ) : (
-              <View style={[styles.avatar, styles.avatarFallback]}>
-                <Ionicons name="business" size={36} color={COLORS.primary} />
+            <TouchableOpacity onPress={handlePickAvatar} activeOpacity={0.7}>
+              {avatarUrl ? (
+                <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+              ) : (
+                <View style={[styles.avatar, styles.avatarFallback]}>
+                  <Ionicons name="business" size={36} color={COLORS.primary} />
+                </View>
+              )}
+              <View style={styles.avatarBadge}>
+                {uploadingAvatar ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="camera" size={14} color="#fff" />
+                )}
               </View>
-            )}
+            </TouchableOpacity>
             <View style={styles.profileInfo}>
               <Text style={styles.profileName}>{company?.company_name || profile?.name || 'Transportadora'}</Text>
               <Text style={styles.profileEmail}>{user?.email}</Text>
@@ -91,10 +152,10 @@ export function ProfileScreen() {
         {/* Settings */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Configurações</Text>
-          <SettingItem icon="notifications-outline" label="Notificações" onPress={() => {}} />
-          <SettingItem icon="shield-outline" label="Privacidade" onPress={() => {}} />
-          <SettingItem icon="help-circle-outline" label="Ajuda e Suporte" onPress={() => {}} />
-          <SettingItem icon="information-circle-outline" label="Sobre o App" onPress={() => {}} />
+          <SettingItem icon="notifications-outline" label="Notificações" onPress={() => navigation.navigate('Settings', { page: 'notifications' })} />
+          <SettingItem icon="shield-outline" label="Privacidade" onPress={() => navigation.navigate('Settings', { page: 'privacy' })} />
+          <SettingItem icon="help-circle-outline" label="Ajuda e Suporte" onPress={() => navigation.navigate('Settings', { page: 'help' })} />
+          <SettingItem icon="information-circle-outline" label="Sobre o App" onPress={() => navigation.navigate('Settings', { page: 'about' })} />
         </View>
 
         <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
@@ -229,6 +290,13 @@ const styles = StyleSheet.create({
   profileTop: { flexDirection: 'row', gap: 14, alignItems: 'center' },
   avatar: { width: 72, height: 72, borderRadius: 36 },
   avatarFallback: { backgroundColor: COLORS.primary + '15', alignItems: 'center', justifyContent: 'center' },
+  avatarBadge: {
+    position: 'absolute', bottom: 0, right: 0,
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: '#fff',
+  },
   profileInfo: { flex: 1, gap: 4 },
   profileName: { fontSize: 18, fontWeight: '800', color: COLORS.text },
   profileEmail: { fontSize: 13, color: COLORS.textSecondary },

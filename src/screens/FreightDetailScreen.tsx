@@ -101,8 +101,7 @@ export function FreightDetailScreen() {
   }
 
   function handleEdit() {
-     // TODO: Navegar para uma tela de edição se existir, ou usar a mesma tela de criação preenchida.
-     Alert.alert('Aviso', 'A edição de fretes será implementada em breve.');
+     navigation.navigate('CreateFreight', { editFreight: freight });
   }
 
   return (

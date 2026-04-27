@@ -63,10 +63,33 @@ export function HomeScreen() {
         unreadMessages = count || 0;
       }
 
+      // 4. Monthly Revenue — fretes concluídos no mês atual
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      const { data: completedFreights } = await supabase
+        .from('freights')
+        .select('value_estimate, metadata')
+        .eq('publisher_id', user.id)
+        .in('status', ['completed', 'contracted'])
+        .gte('updated_at', monthStart.toISOString());
+
+      let monthlyRevenue = 0;
+      if (completedFreights) {
+        for (const f of completedFreights) {
+          if (f.value_estimate != null) {
+            monthlyRevenue += Number(f.value_estimate) || 0;
+          } else if (f.metadata?.price) {
+            const raw = String(f.metadata.price).replace(/R\$\s?/g, '').replace(/\./g, '').replace(',', '.').trim();
+            monthlyRevenue += parseFloat(raw) || 0;
+          }
+        }
+      }
+
       setStats({
         activeFreights: activeFreightsCount || 0,
         connectedDrivers: connectedDriversCount || 0,
-        monthlyRevenue: 0, // Mock for now or implement total_earnings logic
+        monthlyRevenue,
         unreadMessages,
       });
     } finally {

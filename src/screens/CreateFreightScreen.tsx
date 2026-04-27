@@ -5,7 +5,7 @@ import {
   KeyboardAvoidingView, Platform, Keyboard
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -219,69 +219,80 @@ function SegmentedControl({ options, value, onChange }: { options: { label: stri
 export function CreateFreightScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const { user } = useAuth();
+  const editFreight = route.params?.editFreight;
+  const isEditing = !!editFreight;
+
+  // Helper: formata data ISO para DD/MM/AAAA
+  function isoToBr(iso?: string): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  }
 
   // Localização
-  const [originCity, setOriginCity] = useState('');
-  const [originState, setOriginState] = useState('');
+  const [originCity, setOriginCity] = useState(editFreight?.origin?.city || '');
+  const [originState, setOriginState] = useState(editFreight?.origin?.state || '');
   
-  const [destinationCity, setDestinationCity] = useState('');
-  const [destinationState, setDestinationState] = useState('');
+  const [destinationCity, setDestinationCity] = useState(editFreight?.destination?.city || '');
+  const [destinationState, setDestinationState] = useState(editFreight?.destination?.state || '');
 
-  const [pickupDate, setPickupDate] = useState('');
-  const [deliveryDate, setDeliveryDate] = useState('');
+  const [pickupDate, setPickupDate] = useState(isoToBr(editFreight?.pickupDate || editFreight?.scheduled_date));
+  const [deliveryDate, setDeliveryDate] = useState(isoToBr(editFreight?.deliveryDate || editFreight?.deadline_date));
 
   // Dados da carga
-  const [product, setProduct] = useState('');
-  const [cargoType, setCargoType] = useState('');
-  const [species, setSpecies] = useState('');
-  const [totalWeight, setTotalWeight] = useState('');
-  const [volumes, setVolumes] = useState('');
-  const [volumeUnit, setVolumeUnit] = useState('Por toneladas');
-  const [occupancyType, setOccupancyType] = useState<'completa' | 'complemento'>('completa');
-  const [needsCover, setNeedsCover] = useState(true);
-  const [needsTracker, setNeedsTracker] = useState(false);
-  const [isInsured, setIsInsured] = useState(true);
+  const [product, setProduct] = useState(editFreight?.product || editFreight?.title || '');
+  const [cargoType, setCargoType] = useState(editFreight?.cargoType || editFreight?.cargo_type || '');
+  const [species, setSpecies] = useState(editFreight?.species || '');
+  const [totalWeight, setTotalWeight] = useState(editFreight?.weight ? String(editFreight.weight) : '');
+  const [volumes, setVolumes] = useState(editFreight?.volumes ? String(editFreight.volumes) : '');
+  const [volumeUnit, setVolumeUnit] = useState(editFreight?.volumeUnit || 'Por toneladas');
+  const [occupancyType, setOccupancyType] = useState<'completa' | 'complemento'>(editFreight?.occupancyType || 'completa');
+  const [needsCover, setNeedsCover] = useState(editFreight?.needsCover ?? true);
+  const [needsTracker, setNeedsTracker] = useState(editFreight?.needsTracker ?? false);
+  const [isInsured, setIsInsured] = useState(editFreight?.isInsured ?? true);
 
   // Detalhes extras (collapsible)
   const [showExtraDetails, setShowExtraDetails] = useState(false);
-  const [cubicWeight, setCubicWeight] = useState('');
-  const [totalCubicMeters, setTotalCubicMeters] = useState('');
-  const [dimLength, setDimLength] = useState('');
-  const [dimWidth, setDimWidth] = useState('');
-  const [dimHeight, setDimHeight] = useState('');
+  const [cubicWeight, setCubicWeight] = useState(editFreight?.cubicWeight ? String(editFreight.cubicWeight) : '');
+  const [totalCubicMeters, setTotalCubicMeters] = useState(editFreight?.totalCubicMeters ? String(editFreight.totalCubicMeters) : '');
+  const [dimLength, setDimLength] = useState(editFreight?.length ? String(editFreight.length) : '');
+  const [dimWidth, setDimWidth] = useState(editFreight?.width ? String(editFreight.width) : '');
+  const [dimHeight, setDimHeight] = useState(editFreight?.height ? String(editFreight.height) : '');
 
   // Veículos
-  const [selectedLightVehicles, setSelectedLightVehicles] = useState<string[]>([]);
-  const [selectedMediumVehicles, setSelectedMediumVehicles] = useState<string[]>([]);
-  const [selectedHeavyVehicles, setSelectedHeavyVehicles] = useState<string[]>([]);
+  const [selectedLightVehicles, setSelectedLightVehicles] = useState<string[]>(editFreight?.selectedLightVehicles || []);
+  const [selectedMediumVehicles, setSelectedMediumVehicles] = useState<string[]>(editFreight?.selectedMediumVehicles || []);
+  const [selectedHeavyVehicles, setSelectedHeavyVehicles] = useState<string[]>(editFreight?.selectedHeavyVehicles || []);
 
   // Carrocerias
-  const [selectedClosedTrailers, setSelectedClosedTrailers] = useState<string[]>([]);
-  const [selectedOpenTrailers, setSelectedOpenTrailers] = useState<string[]>([]);
-  const [selectedSpecialTrailers, setSelectedSpecialTrailers] = useState<string[]>([]);
+  const [selectedClosedTrailers, setSelectedClosedTrailers] = useState<string[]>(editFreight?.selectedClosedTrailers || []);
+  const [selectedOpenTrailers, setSelectedOpenTrailers] = useState<string[]>(editFreight?.selectedOpenTrailers || []);
+  const [selectedSpecialTrailers, setSelectedSpecialTrailers] = useState<string[]>(editFreight?.selectedSpecialTrailers || []);
 
   // Valor e pagamento
-  const [freightValueType, setFreightValueType] = useState<'known' | 'negotiable'>('known');
-  const [freightValue, setFreightValue] = useState('');
-  const [valueCalculation, setValueCalculation] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('');
-  const [tollPayment, setTollPayment] = useState<'included' | 'separate'>('included');
-  const [advancePayment, setAdvancePayment] = useState('');
+  const [freightValueType, setFreightValueType] = useState<'known' | 'negotiable'>(editFreight?.freightValueType || (editFreight?.price && editFreight.price !== 'A combinar' ? 'known' : 'known'));
+  const [freightValue, setFreightValue] = useState(editFreight?.price && typeof editFreight.price === 'number' ? String(editFreight.price) : (editFreight?.freightValue || ''));
+  const [valueCalculation, setValueCalculation] = useState(editFreight?.valueCalculation || '');
+  const [paymentMethod, setPaymentMethod] = useState(editFreight?.paymentMethod || '');
+  const [tollPayment, setTollPayment] = useState<'included' | 'separate'>(editFreight?.tollPayment || 'included');
+  const [advancePayment, setAdvancePayment] = useState(editFreight?.advancePayment || '');
 
   // Urgência
-  const [urgencyType, setUrgencyType] = useState<'normal' | 'urgent' | 'scheduled'>('normal');
-  const [scheduledDate, setScheduledDate] = useState('');
+  const [urgencyType, setUrgencyType] = useState<'normal' | 'urgent' | 'scheduled'>(editFreight?.urgencyType || 'normal');
+  const [scheduledDate, setScheduledDate] = useState(editFreight?.scheduledDate || '');
 
   // Tipo de Frete e Exposição
 
 
   // Carga Adicional
-  const [hasAdditionalCargo, setHasAdditionalCargo] = useState(false);
-  const [additionalCargoDetails, setAdditionalCargoDetails] = useState('');
+  const [hasAdditionalCargo, setHasAdditionalCargo] = useState(editFreight?.hasAdditionalCargo || false);
+  const [additionalCargoDetails, setAdditionalCargoDetails] = useState(editFreight?.additionalCargoDetails || '');
 
   // Responsáveis pelo frete
-  const [responsibleContacts, setResponsibleContacts] = useState<any[]>([]);
+  const [responsibleContacts, setResponsibleContacts] = useState<any[]>(editFreight?.responsibleContacts || []);
   const [companyCollaborators, setCompanyCollaborators] = useState<any[]>([]);
   const [savedContacts, setSavedContacts] = useState<any[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(true);
@@ -296,7 +307,7 @@ export function CreateFreightScreen() {
   });
 
   // Observações
-  const [observations, setObservations] = useState('');
+  const [observations, setObservations] = useState(editFreight?.observations || '');
 
   // UI
   const [loading, setLoading] = useState(false);
@@ -535,7 +546,7 @@ export function CreateFreightScreen() {
 
     setLoading(true);
     try {
-      const { error } = await supabase.from('freights').insert({
+      const freightData = {
         publisher_id: user?.id,
         title: product,
         cargo_type: cargoType || product || 'Carga Geral',
@@ -600,10 +611,20 @@ export function CreateFreightScreen() {
             source: c.source
           })),
         },
-      });
+      };
+
+      let error;
+      if (isEditing && editFreight?.id) {
+        ({ error } = await supabase.from('freights').update(freightData).eq('id', editFreight.id));
+      } else {
+        ({ error } = await supabase.from('freights').insert(freightData));
+      }
 
       if (error) throw error;
-      Alert.alert('Sucesso', asScheduled ? 'Frete agendado com sucesso!' : 'Frete publicado com sucesso!');
+      Alert.alert(
+        'Sucesso',
+        isEditing ? 'Frete atualizado com sucesso!' : (asScheduled ? 'Frete agendado com sucesso!' : 'Frete publicado com sucesso!')
+      );
       navigation.goBack();
     } catch (err: any) {
       Alert.alert('Erro', err.message || 'Falha ao salvar frete');
@@ -622,8 +643,8 @@ export function CreateFreightScreen() {
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <View>
-          <Text style={s.headerTitle}>Criar Frete</Text>
-          <Text style={s.headerSubtitle}>Preencha os dados da carga</Text>
+          <Text style={s.headerTitle}>{isEditing ? 'Editar Frete' : 'Criar Frete'}</Text>
+          <Text style={s.headerSubtitle}>{isEditing ? 'Altere os dados do frete' : 'Preencha os dados da carga'}</Text>
         </View>
       </View>
       
@@ -997,7 +1018,7 @@ export function CreateFreightScreen() {
                       onPress={() => handleToggleContact(c)}
                       style={{ padding: 8 }}
                     >
-                      <Ionicons name="close-circle-outline" size={20} color={COLORS.red} />
+                      <Ionicons name="close-circle-outline" size={20} color={COLORS.danger} />
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -1049,17 +1070,19 @@ export function CreateFreightScreen() {
 
         {/* ── Ações ────────────────────────────────────────────────────────── */}
         <View style={s.actions}>
-          <TouchableOpacity
-            style={[s.scheduleBtn, loading && s.btnDisabled]}
-            onPress={() => handlePublish(true)}
-            disabled={loading}
-          >
-            <Ionicons name="calendar-outline" size={18} color={COLORS.primary} />
-            <Text style={s.scheduleBtnText}>Agendar</Text>
-          </TouchableOpacity>
+          {!isEditing && (
+            <TouchableOpacity
+              style={[s.scheduleBtn, loading && s.btnDisabled]}
+              onPress={() => handlePublish(true)}
+              disabled={loading}
+            >
+              <Ionicons name="calendar-outline" size={18} color={COLORS.primary} />
+              <Text style={s.scheduleBtnText}>Agendar</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
-            style={[s.publishBtn, loading && s.btnDisabled]}
+            style={[s.publishBtn, loading && s.btnDisabled, isEditing && { flex: 1 }]}
             onPress={() => handlePublish(false)}
             disabled={loading}
           >
@@ -1067,8 +1090,8 @@ export function CreateFreightScreen() {
               <ActivityIndicator color="#fff" />
             ) : (
               <>
-                <Text style={s.publishBtnText}>Publicar Agora</Text>
-                <Ionicons name="arrow-forward" size={18} color="#fff" />
+                <Text style={s.publishBtnText}>{isEditing ? 'Salvar Alterações' : 'Publicar Agora'}</Text>
+                <Ionicons name={isEditing ? "checkmark" : "arrow-forward"} size={18} color="#fff" />
               </>
             )}
           </TouchableOpacity>
