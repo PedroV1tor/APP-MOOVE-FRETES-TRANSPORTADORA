@@ -11,6 +11,10 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { COLORS } from '../utils/constants';
 import { CityAutocompleteInput } from '../components/CityAutocompleteInput';
+import { 
+  SectionCard, FieldLabel, InputBox, ChipItem, 
+  SegmentedControl, InlineSelect, YesNoToggle 
+} from '../components/freights/FormComponents';
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
 
@@ -52,167 +56,6 @@ function parseBrDate(str: string): string | null {
 function toggleItem(arr: string[], item: string): string[] {
   return arr.includes(item) ? arr.filter(v => v !== item) : [...arr, item];
 }
-
-// ─── Sub-componentes internos ─────────────────────────────────────────────────
-
-function SectionCard({ children, title, icon, subtitle }: { children: React.ReactNode; title?: string; icon?: string; subtitle?: string }) {
-  return (
-    <View style={s.card}>
-      {title && (
-        <View style={s.cardHeader}>
-          <View style={s.cardHeaderIcon}>
-            <Ionicons name={icon as any} size={18} color={COLORS.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.cardTitle}>{title}</Text>
-            {subtitle ? <Text style={s.cardSubtitle}>{subtitle}</Text> : null}
-          </View>
-        </View>
-      )}
-      <View style={s.cardBody}>{children}</View>
-    </View>
-  );
-}
-
-function FieldLabel({ children, optional, style }: { children: string; optional?: boolean; style?: any }) {
-  return (
-    <Text style={[s.label, style]}>
-      {children}
-      {optional ? <Text style={s.labelOptional}> (opcional)</Text> : null}
-    </Text>
-  );
-}
-
-function InputBox({ value, onChangeText, placeholder, keyboardType, multiline, maxLength, style, icon, returnKeyType, onSubmitEditing }: any) {
-  const [isFocused, setIsFocused] = useState(false);
-  return (
-    <View style={[
-      s.inputBox, 
-      multiline && s.inputBoxMulti, 
-      isFocused && s.inputBoxFocused,
-      style
-    ]}>
-      {icon && <Ionicons name={icon} size={18} color={isFocused ? COLORS.primary : COLORS.textLight} style={{ marginRight: 10 }} />}
-      <TextInput
-        style={[s.input, multiline && s.inputMulti]}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={COLORS.textLight}
-        keyboardType={keyboardType}
-        multiline={multiline}
-        maxLength={maxLength}
-        textAlignVertical={multiline ? 'top' : 'center'}
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
-        returnKeyType={returnKeyType || (multiline ? 'default' : 'done')}
-        onSubmitEditing={onSubmitEditing}
-        blurOnSubmit={!multiline}
-      />
-    </View>
-  );
-}
-
-function InlineSelect({ value, placeholder, options, onSelect, icon }: { value: string; placeholder: string; options: string[]; onSelect: (v: string) => void; icon?: string }) {
-  const [isOpen, setIsOpen] = useState(false);
-  return (
-    <View style={{ zIndex: isOpen ? 100 : 1 }}>
-      <TouchableOpacity 
-        style={[s.selectBtn, isOpen && { borderColor: COLORS.primary }]} 
-        onPress={() => setIsOpen(!isOpen)} 
-        activeOpacity={0.7}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-          {icon && <Ionicons name={icon as any} size={18} color={isOpen ? COLORS.primary : COLORS.textLight} style={{ marginRight: 10 }} />}
-          <Text style={[s.selectBtnText, !value && s.selectBtnPlaceholder]} numberOfLines={1}>
-            {value || placeholder}
-          </Text>
-        </View>
-        <Ionicons name={isOpen ? "chevron-up" : "chevron-down"} size={16} color={COLORS.textSecondary} />
-      </TouchableOpacity>
-
-      {isOpen && (
-        <View style={s.dropdownContainer}>
-          <ScrollView 
-            style={s.dropdown} 
-            nestedScrollEnabled={true}
-            showsVerticalScrollIndicator={true}
-            keyboardShouldPersistTaps="handled"
-          >
-            {options.map((opt, idx) => (
-              <TouchableOpacity
-                key={opt}
-                style={[s.dropdownItem, idx < options.length - 1 && s.dropdownBorder]}
-                onPress={() => {
-                  onSelect(opt);
-                  setIsOpen(false);
-                }}
-              >
-                <Text style={[s.dropdownItemText, value === opt && { color: COLORS.primary, fontWeight: '700' }]}>{opt}</Text>
-                {value === opt && <Ionicons name="checkmark" size={16} color={COLORS.primary} />}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-    </View>
-  );
-}
-
-function ChipItem({ label, checked, onPress }: { label: string; checked: boolean; onPress: () => void }) {
-  return (
-    <TouchableOpacity 
-      style={[s.chip, checked && s.chipChecked]} 
-      onPress={onPress} 
-      activeOpacity={0.6}
-    >
-      <Text style={[s.chipLabel, checked && s.chipLabelChecked]}>{label}</Text>
-      {checked && <Ionicons name="checkmark-circle" size={14} color="#fff" style={{ marginLeft: 4 }} />}
-    </TouchableOpacity>
-  );
-}
-
-function YesNoToggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <View style={s.yesNoContainer}>
-      <Text style={s.yesNoLabel}>{label}</Text>
-      <View style={s.yesNoRow}>
-        <TouchableOpacity
-          style={[s.yesNoBtn, value && s.yesNoBtnActive]}
-          onPress={() => onChange(true)}
-        >
-          <Text style={[s.yesNoBtnText, value && s.yesNoBtnTextActive]}>Sim</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.yesNoBtn, !value && s.yesNoBtnActive]}
-          onPress={() => onChange(false)}
-        >
-          <Text style={[s.yesNoBtnText, !value && s.yesNoBtnTextActive]}>Não</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-}
-
-function SegmentedControl({ options, value, onChange }: { options: { label: string; value: string }[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <View style={s.segmented}>
-      {options.map(opt => (
-        <TouchableOpacity
-          key={opt.value}
-          style={[s.segmentedItem, value === opt.value && s.segmentedItemActive]}
-          onPress={() => onChange(opt.value)}
-          activeOpacity={0.7}
-        >
-          <Text style={[s.segmentedText, value === opt.value && s.segmentedTextActive]}>
-            {opt.label}
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-}
-
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
@@ -1109,16 +952,21 @@ export function CreateFreightScreen() {
         animationType="fade"
         onRequestClose={() => setIsContactDialogOpen(false)}
       >
-        <TouchableOpacity 
-          style={s.modalOverlay} 
-          activeOpacity={1} 
-          onPress={() => setIsContactDialogOpen(false)} 
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+        <TouchableOpacity
+          style={s.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setIsContactDialogOpen(false)}
         />
         <View style={[s.modalSheet, { maxHeight: '90%' }]}>
           <View style={s.modalHandle} />
-          <ScrollView 
+          <ScrollView
             contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
             <Text style={[s.modalTitle, { borderBottomWidth: 0, paddingHorizontal: 0 }]}>Novo Contato Responsável</Text>
             <Text style={{ fontSize: 13, color: COLORS.textSecondary, textAlign: 'center', marginBottom: 20 }}>
@@ -1170,6 +1018,7 @@ export function CreateFreightScreen() {
             </TouchableOpacity>
           </ScrollView>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── Modal de Seleção de Responsáveis (Institucional) ──────────────── */}

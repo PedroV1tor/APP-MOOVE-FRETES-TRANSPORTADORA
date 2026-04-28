@@ -204,9 +204,9 @@ export function ChatScreen() {
       .select('id');
       
     if (updateError) {
-      console.warn('Failed to update messages read status:', updateError);
+      if (__DEV__) console.warn('Failed to update messages read status:', updateError);
     } else {
-      console.log('Messages marked as read:', updateData?.length || 0);
+      if (__DEV__) console.log('Messages marked as read:', updateData?.length || 0);
     }
   }, [user, otherUserId, getOrCreateConversation]);
 
@@ -231,7 +231,10 @@ export function ChatScreen() {
       }, (payload) => {
         const msg = payload.new as Message;
         if (msg.sender_id !== user.id) {
-          setMessages(prev => [...prev, msg]);
+          setMessages(prev => {
+            if (prev.some(m => m.id === msg.id)) return prev;
+            return [...prev, msg];
+          });
           supabase.from('messages').update({ is_read: true }).eq('id', msg.id);
         }
       })
@@ -506,9 +509,9 @@ export function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
-      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+      <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.navigate('Main', { screen: 'ChatTab', params: { screen: 'ChatList' } })} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
+          <Ionicons name="arrow-back" size={22} color={COLORS.text} />
         </TouchableOpacity>
         <TouchableOpacity style={styles.headerInfo} onPress={() => setShowProfileModal(true)} activeOpacity={0.8}>
           <CachedAvatar
@@ -523,12 +526,12 @@ export function ChatScreen() {
                 <Ionicons
                   name={convData.source === 'freight' ? 'document-text-outline' : 'map-outline'}
                   size={10}
-                  color="rgba(255,255,255,0.9)"
+                  color={COLORS.primary}
                 />
                 <Text style={styles.headerRouteText} numberOfLines={1} ellipsizeMode="tail">
                   {convData.originCity}/{convData.originState}
                 </Text>
-                <Ionicons name="arrow-forward" size={10} color="rgba(255,255,255,0.7)" />
+                <Ionicons name="arrow-forward" size={10} color={COLORS.textSecondary} />
                 <Text style={styles.headerRouteText} numberOfLines={1} ellipsizeMode="tail">
                   {convData.destinationCity}/{convData.destinationState}
                 </Text>
@@ -538,7 +541,7 @@ export function ChatScreen() {
           </View>
         </TouchableOpacity>
         <TouchableOpacity style={styles.headerOptionsBtn} onPress={() => setShowOptionsModal(true)}>
-          <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+          <Ionicons name="ellipsis-vertical" size={22} color={COLORS.text} />
         </TouchableOpacity>
       </View>
 
@@ -778,21 +781,21 @@ export function ChatScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: COLORS.background },
   header: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.surface,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    borderBottomColor: COLORS.border,
   },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerInfo: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   headerInfoText: { gap: 1, flex: 1 },
   headerRouteRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginBottom: 1 },
-  headerRouteText: { fontSize: 10, color: '#fff', fontWeight: '600', flexShrink: 1, opacity: 0.9 },
-  headerName: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  headerRouteText: { fontSize: 10, color: COLORS.primary, fontWeight: '600', flexShrink: 1 },
+  headerName: { fontSize: 15, fontWeight: '700', color: COLORS.text },
   headerSub: { fontSize: 12, color: COLORS.textSecondary },
   messages: { padding: 12, paddingBottom: 8, gap: 4 },
   daySeparator: {

@@ -6,9 +6,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as Sentry from '@sentry/react-native';
 import { AuthProvider } from './src/contexts/AuthContext';
+import { ToastProvider } from './src/contexts/ToastContext';
 import { AppNavigator } from './src/navigation';
 import { useNotificationListeners } from './src/services/notifications';
 import { navigate } from './src/navigation/navigationRef';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 
 Sentry.init({
   dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
@@ -43,19 +45,27 @@ function AppWithNotifications() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <QueryClientProvider client={queryClient}>
-          <AuthProvider>
-            <StatusBar style="auto" />
-            <AppNavigator />
-          </AuthProvider>
-        </QueryClientProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <QueryClientProvider client={queryClient}>
+              <ErrorBoundary>
+                <AppNavigator />
+              </ErrorBoundary>
+              <StatusBar style="light" />
+            </QueryClientProvider>
+          </ToastProvider>
+        </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
 
 function App() {
-  return <AppWithNotifications />;
+  return (
+    <ErrorBoundary>
+      <AppWithNotifications />
+    </ErrorBoundary>
+  );
 }
 
 export default Sentry.wrap(App);

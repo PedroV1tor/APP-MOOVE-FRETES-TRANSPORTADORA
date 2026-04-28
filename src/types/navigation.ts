@@ -1,10 +1,12 @@
-import type { Freight, Profile } from './index';
+import type { Freight, Driver } from './index';
 
 export type RootStackParamList = {
   Main: undefined;
   Login: undefined;
+  SignUp: undefined;
   FreightDetail: { freight: Freight };
-  CompanyDetail: { companyId: string };
+  CreateFreight: { editFreight?: Freight } | undefined;
+  DriverDetail: { driver: Driver };
   Chat: {
     conversationId?: string;
     userId: string;
@@ -19,25 +21,26 @@ export type RootStackParamList = {
     initialMessage?: string;
   };
   Notifications: undefined;
-  ProfileTab: undefined;
+  Settings: { page?: string } | undefined;
 };
 
 export type MainTabParamList = {
   HomeTab: undefined;
   FreightsTab: undefined;
-  CompaniesTab: undefined;
-  RoutesTab: undefined;
+  DriversTab: undefined;
   ChatTab: undefined;
+  ProfileTab: undefined;
 };
 
 export type FreightsStackParamList = {
   FreightsList: undefined;
   FreightDetail: { freight: Freight };
+  CreateFreight: { editFreight?: Freight } | undefined;
 };
 
-export type CompaniesStackParamList = {
-  CompaniesList: undefined;
-  CompanyDetail: { companyId: string };
+export type DriversStackParamList = {
+  DriversList: undefined;
+  DriverDetail: { driver: Driver };
 };
 
 export type ChatStackParamList = {

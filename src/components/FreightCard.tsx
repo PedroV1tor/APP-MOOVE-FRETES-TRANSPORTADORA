@@ -20,7 +20,7 @@ function buildWhatsAppMessage(freight: Freight): string {
   return encodeURIComponent(msg);
 }
 
-export function FreightCard({ freight, onPress, showActions }: FreightCardProps) {
+export const FreightCard = React.memo(({ freight, onPress, showActions }: FreightCardProps) => {
   const meta: string[] = [];
   if (freight.cargo_type) meta.push(freight.cargo_type);
   if (freight.vehicle_types && freight.vehicle_types.length > 0) {
@@ -93,7 +93,7 @@ export function FreightCard({ freight, onPress, showActions }: FreightCardProps)
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {

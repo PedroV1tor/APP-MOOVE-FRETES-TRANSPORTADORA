@@ -1,12 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Switch, Alert, Linking,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { COLORS } from '../utils/constants';
+
+const SETTINGS_KEY = '@moovefretes_settings';
 
 type SettingsPage = 'notifications' | 'privacy' | 'help' | 'about';
 
@@ -43,19 +47,74 @@ export function SettingsScreen() {
   );
 }
 
+function usePersistentSetting(key: string, defaultValue: boolean): [boolean, (v: boolean) => void] {
+  const [value, setValue] = useState(defaultValue);
+
+  useEffect(() => {
+    AsyncStorage.getItem(SETTINGS_KEY).then(stored => {
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed[key] !== undefined) setValue(parsed[key]);
+      }
+    }).catch(() => {});
+  }, [key]);
+
+  const update = useCallback((v: boolean) => {
+    setValue(v);
+    AsyncStorage.getItem(SETTINGS_KEY).then(stored => {
+      const current = stored ? JSON.parse(stored) : {};
+      current[key] = v;
+      AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(current));
+    }).catch(() => {});
+  }, [key]);
+
+  return [value, update];
+}
+
 function NotificationsPage() {
-  const [pushEnabled, setPushEnabled] = useState(true);
-  const [freightAlerts, setFreightAlerts] = useState(true);
-  const [messageAlerts, setMessageAlerts] = useState(true);
-  const [ratingAlerts, setRatingAlerts] = useState(true);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [vibrationEnabled, setVibrationEnabled] = useState(true);
+  const [pushEnabled, setPushEnabledRaw] = usePersistentSetting('pushEnabled', true);
+  const [freightAlerts, setFreightAlerts] = usePersistentSetting('freightAlerts', true);
+  const [messageAlerts, setMessageAlerts] = usePersistentSetting('messageAlerts', true);
+  const [ratingAlerts, setRatingAlerts] = usePersistentSetting('ratingAlerts', true);
+  const [soundEnabled, setSoundEnabled] = usePersistentSetting('soundEnabled', true);
+  const [vibrationEnabled, setVibrationEnabled] = usePersistentSetting('vibrationEnabled', true);
+
+  async function handlePushToggle(value: boolean) {
+    if (value) {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permissão negada',
+          'Para receber notificações, ative nas configurações do seu dispositivo.',
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Abrir Configurações', onPress: () => Linking.openSettings() },
+          ]
+        );
+        return;
+      }
+    }
+    Notifications.setNotificationHandler(
+      value
+        ? {
+            handleNotification: async () => ({
+              shouldShowAlert: true,
+              shouldPlaySound: soundEnabled,
+              shouldSetBadge: true,
+              shouldShowBanner: true,
+              shouldShowList: true,
+            }),
+          }
+        : { handleNotification: async () => ({ shouldShowAlert: false, shouldPlaySound: false, shouldSetBadge: false, shouldShowBanner: false, shouldShowList: false }) }
+    );
+    setPushEnabledRaw(value);
+  }
 
   return (
     <View style={styles.sections}>
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Notificações Push</Text>
-        <ToggleRow label="Ativar notificações push" value={pushEnabled} onChange={setPushEnabled} />
+        <ToggleRow label="Ativar notificações push" value={pushEnabled} onChange={handlePushToggle} />
       </View>
 
       <View style={styles.section}>
@@ -75,9 +134,9 @@ function NotificationsPage() {
 }
 
 function PrivacyPage() {
-  const [shareLocation, setShareLocation] = useState(false);
-  const [showPhone, setShowPhone] = useState(true);
-  const [showEmail, setShowEmail] = useState(true);
+  const [shareLocation, setShareLocation] = usePersistentSetting('shareLocation', false);
+  const [showPhone, setShowPhone] = usePersistentSetting('showPhone', true);
+  const [showEmail, setShowEmail] = usePersistentSetting('showEmail', true);
 
   return (
     <View style={styles.sections}>
@@ -111,7 +170,7 @@ function HelpPage() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Central de Ajuda</Text>
 
-        <TouchableOpacity style={styles.helpCard} onPress={() => Linking.openURL('https://wa.me/5500000000000?text=Olá, preciso de ajuda com o app MooveFretes Transportadora')}>
+        <TouchableOpacity style={styles.helpCard} onPress={() => Linking.openURL('https://wa.me/5511999999999?text=Olá, preciso de ajuda com o app MooveFretes Transportadora')}>
           <View style={[styles.helpIcon, { backgroundColor: '#25D366' + '15' }]}>
             <Ionicons name="logo-whatsapp" size={24} color="#25D366" />
           </View>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   RefreshControl, ActivityIndicator, Modal, ScrollView,
-  KeyboardAvoidingView, Platform, Linking,
+  KeyboardAvoidingView, Platform, Linking, TextInput,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +22,7 @@ interface FilterState {
   minRating: '' | '2' | '3' | '4';
   city: string;
   onlyFavorites: boolean;
+  searchQuery: string;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -30,6 +31,7 @@ const DEFAULT_FILTERS: FilterState = {
   minRating: '',
   city: '',
   onlyFavorites: false,
+  searchQuery: '',
 };
 
 function countActiveFilters(f: FilterState): number {
@@ -143,6 +145,9 @@ export function DriversScreen() {
       const driverCity = d.current_location?.city || '';
       if (!driverCity.toLowerCase().includes(filters.city.toLowerCase())) return false;
     }
+    if (filters.searchQuery.trim()) {
+      if (!d.name.toLowerCase().includes(filters.searchQuery.toLowerCase())) return false;
+    }
     return true;
   }), [drivers, filters, favorites]);
 
@@ -166,6 +171,24 @@ export function DriversScreen() {
             </View>
           )}
         </TouchableOpacity>
+      </View>
+
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBar}>
+          <Ionicons name="search-outline" size={20} color={COLORS.textLight} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar por nome do motorista..."
+            value={filters.searchQuery}
+            onChangeText={(t) => setFilters(prev => ({ ...prev, searchQuery: t }))}
+            placeholderTextColor={COLORS.textLight}
+          />
+          {filters.searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setFilters(prev => ({ ...prev, searchQuery: '' }))}>
+              <Ionicons name="close-circle" size={18} color={COLORS.textLight} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       <AppliedFiltersBar
@@ -401,7 +424,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
   },
   title: { fontSize: 22, fontWeight: '800', color: '#fff' },
-  subtitle: { fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
+  subtitle: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
+  },
+  searchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: COLORS.primary,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 44,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 14,
+    color: COLORS.text,
+  },
   filterBtn: {
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.2)',

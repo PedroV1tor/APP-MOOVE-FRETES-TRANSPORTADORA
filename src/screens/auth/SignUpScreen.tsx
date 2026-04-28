@@ -8,7 +8,40 @@ import { supabase } from '../../lib/supabase';
 import { COLORS } from '../../utils/constants';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const CNPJ_REGEX = /^\d{14}$/;
+
+function isValidCnpj(cnpj: string): boolean {
+  cnpj = cnpj.replace(/[^\d]+/g, '');
+  if (cnpj.length !== 14) return false;
+  if (/^(\d)\1+$/.test(cnpj)) return false;
+  
+  let size = cnpj.length - 2;
+  let numbers = cnpj.substring(0, size);
+  let digits = cnpj.substring(size);
+  let sum = 0;
+  let pos = size - 7;
+  
+  for (let i = size; i >= 1; i--) {
+    sum += Number(numbers.charAt(size - i)) * pos--;
+    if (pos < 2) pos = 9;
+  }
+  
+  let result = sum % 11 < 2 ? 0 : 11 - (sum % 11);
+  if (result !== Number(digits.charAt(0))) return false;
+  
+  size = size + 1;
+  numbers = cnpj.substring(0, size);
+  sum = 0;
+  pos = size - 7;
+  for (let i = size; i >= 1; i--) {
+    sum += Number(numbers.charAt(size - i)) * pos--;
+    if (pos < 2) pos = 9;
+  }
+  
+  result = sum % 11 < 2 ? 0 : 11 - (sum % 11);
+  if (result !== Number(digits.charAt(1))) return false;
+  
+  return true;
+}
 
 export function SignUpScreen({ navigation }: any) {
   const [step, setStep] = useState<1 | 2>(1);
@@ -75,6 +108,8 @@ export function SignUpScreen({ navigation }: any) {
   function validateStep2(): boolean {
     const errs: Record<string, string> = {};
     if (!companyName.trim()) errs.companyName = 'Informe a razão social.';
+    if (!cnpj.trim()) errs.cnpj = 'Informe o CNPJ.';
+    else if (!isValidCnpj(cnpj)) errs.cnpj = 'CNPJ inválido.';
     if (!phone.trim()) errs.phone = 'Informe o telefone.';
     setErrors(errs);
     return Object.keys(errs).length === 0;

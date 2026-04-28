@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Linking, Alert, Vibration,
+  ActivityIndicator, Linking, Alert, Vibration, Modal, TextInput, RefreshControl,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +9,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { COLORS } from '../utils/constants';
+import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
 import { formatPhone, getTimeAgo } from '../utils/helpers';
 import { CachedAvatar } from '../components/CachedAvatar';
 import type { Driver, Rating } from '../types';
@@ -27,11 +29,18 @@ export function DriverDetailScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const driver: Driver = route.params?.driver;
+  const { showToast } = useToast();
 
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showRateModal, setShowRateModal] = useState(false);
+  const [ratingValue, setRatingValue] = useState(5);
+  const [ratingComment, setRatingComment] = useState('');
+  const [submittingRating, setSubmittingRating] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     AsyncStorage.getItem(FAVORITES_KEY).then(stored => {
@@ -46,6 +55,7 @@ export function DriverDetailScreen() {
       const next = favs.includes(driver.id) ? favs.filter(id => id !== driver.id) : [...favs, driver.id];
       await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
       setIsFavorite(!isFavorite);
+      showToast(isFavorite ? 'Removido dos favoritos' : 'Adicionado aos favoritos');
     } catch {}
   }, [driver.id, isFavorite]);
 
@@ -67,6 +77,50 @@ export function DriverDetailScreen() {
   }, [driver.user_id]);
 
   useEffect(() => { loadDetails(); }, [loadDetails]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadDetails();
+    setRefreshing(false);
+  };
+
+  async function handleSubmitRating() {
+    if (!user) return;
+    setSubmittingRating(true);
+    try {
+      const { data: existing } = await supabase
+        .from('ratings')
+        .select('id')
+        .eq('target_id', driver.user_id)
+        .eq('author_id', user.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (existing) {
+        showToast('Você já avaliou este motorista.', 'error');
+        setShowRateModal(false);
+        return;
+      }
+
+      const { error } = await supabase.from('ratings').insert({
+        target_id: driver.user_id,
+        author_id: user.id,
+        overall_rating: ratingValue,
+        comment: ratingComment.trim() || null,
+        created_at: new Date().toISOString(),
+      });
+      if (error) throw error;
+      showToast('Avaliação enviada com sucesso!');
+      setShowRateModal(false);
+      setRatingComment('');
+      setRatingValue(5);
+      loadDetails();
+    } catch (err: any) {
+      showToast('Não foi possível enviar a avaliação.', 'error');
+    } finally {
+      setSubmittingRating(false);
+    }
+  }
 
   const avgRating = ratings.length > 0
     ? ratings.reduce((s, r) => s + r.overall_rating, 0) / ratings.length
@@ -120,9 +174,19 @@ export function DriverDetailScreen() {
       {loading ? (
         <ActivityIndicator size="large" color={COLORS.primary} style={{ flex: 1 }} />
       ) : (
-        <ScrollView style={styles.flex} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView 
+          style={styles.flex} 
+          contentContainerStyle={styles.content} 
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={COLORS.primary} />}
+        >
           {activeTab === 'overview' && (
-            <OverviewTab driver={driver} avgRating={avgRating} ratingCount={ratings.length} />
+            <OverviewTab 
+              driver={driver} 
+              avgRating={avgRating} 
+              ratingCount={ratings.length} 
+              onRate={() => setShowRateModal(true)}
+            />
           )}
           {activeTab === 'ratings' && (
             <RatingsTab ratings={ratings} avgRating={avgRating} />
@@ -132,6 +196,54 @@ export function DriverDetailScreen() {
           )}
         </ScrollView>
       )}
+
+      {/* Rating Modal */}
+      <Modal visible={showRateModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Avaliar {driver.name}</Text>
+              <TouchableOpacity onPress={() => setShowRateModal(false)}>
+                <Ionicons name="close" size={24} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalBody}>
+              <Text style={styles.modalLabel}>Sua nota:</Text>
+              <View style={styles.starsRow}>
+                {[1, 2, 3, 4, 5].map(star => (
+                  <TouchableOpacity key={star} onPress={() => setRatingValue(star)}>
+                    <Ionicons 
+                      name={star <= ratingValue ? 'star' : 'star-outline'} 
+                      size={36} 
+                      color={COLORS.gold} 
+                    />
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.modalLabel}>Comentário (opcional):</Text>
+              <TextInput
+                style={styles.ratingInput}
+                placeholder="Escreva como foi sua experiência com este motorista..."
+                multiline
+                numberOfLines={4}
+                value={ratingComment}
+                onChangeText={setRatingComment}
+              />
+              <TouchableOpacity 
+                style={[styles.submitBtn, submittingRating && styles.btnDisabled]} 
+                onPress={handleSubmitRating}
+                disabled={submittingRating}
+              >
+                {submittingRating ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.submitBtnText}>Enviar Avaliação</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <View style={styles.bottomBar}>
         <TouchableOpacity style={styles.chatBtn} onPress={handleChat}>
@@ -151,7 +263,7 @@ export function DriverDetailScreen() {
   );
 }
 
-function OverviewTab({ driver, avgRating, ratingCount }: { driver: Driver; avgRating: number; ratingCount: number }) {
+function OverviewTab({ driver, avgRating, ratingCount, onRate }: { driver: Driver; avgRating: number; ratingCount: number; onRate: () => void }) {
   return (
     <>
       <View style={ovStyles.card}>
@@ -167,12 +279,13 @@ function OverviewTab({ driver, avgRating, ratingCount }: { driver: Driver; avgRa
                 </Text>
               </View>
             )}
-            {avgRating > 0 && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Stars rating={avgRating} size={12} />
-                <Text style={ovStyles.ratingTxt}>{avgRating.toFixed(1)} ({ratingCount})</Text>
-              </View>
-            )}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+              <Stars rating={avgRating} size={14} />
+              <Text style={ovStyles.ratingTxt}>{avgRating > 0 ? avgRating.toFixed(1) : 'S/A'} ({ratingCount})</Text>
+              <TouchableOpacity onPress={onRate} style={ovStyles.rateLink}>
+                <Text style={ovStyles.rateLinkText}>Avaliar</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
@@ -313,21 +426,45 @@ const styles = StyleSheet.create({
   content: { padding: 16, gap: 12, paddingBottom: 100 },
   bottomBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    flexDirection: 'row', gap: 8,
-    backgroundColor: COLORS.surface, paddingHorizontal: 16, paddingVertical: 6,
-    borderTopWidth: 1, borderTopColor: COLORS.border,
-    elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 4,
+    flexDirection: 'row', padding: 16, borderTopWidth: 1, borderTopColor: COLORS.border,
+    backgroundColor: '#fff', gap: 12,
   },
   chatBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
-    flex: 1, height: 38, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.background,
-  },
-  chatBtnText: { color: COLORS.primary, fontSize: 13, fontWeight: '600' },
-  whatsappBtn: {
+    flex: 1, height: 44, borderRadius: 12, borderWidth: 1, borderColor: COLORS.primary,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    flex: 1.5, height: 38, borderRadius: 10, backgroundColor: '#25D366',
   },
-  whatsappBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  chatBtnText: { color: COLORS.primary, fontWeight: '700', fontSize: 13 },
+  whatsappBtn: {
+    flex: 2, height: 44, borderRadius: 12, backgroundColor: '#25D366',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+  },
+  whatsappBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, paddingBottom: 40,
+  },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: COLORS.text },
+  modalBody: { gap: 16 },
+  modalLabel: { fontSize: 14, fontWeight: '700', color: COLORS.textSecondary },
+  starsRow: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginVertical: 8 },
+  ratingInput: {
+    borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, padding: 12,
+    fontSize: 14, color: COLORS.text, height: 100, textAlignVertical: 'top',
+  },
+  submitBtn: {
+    backgroundColor: COLORS.primary, height: 50, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center', marginTop: 12,
+  },
+  btnDisabled: { backgroundColor: COLORS.textLight },
+  submitBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
 });
 
 const ovStyles = StyleSheet.create({
@@ -336,8 +473,10 @@ const ovStyles = StyleSheet.create({
   info: { flex: 1, gap: 5 },
   name: { fontSize: 16, fontWeight: '700', color: COLORS.text, flex: 1 },
   sub: { fontSize: 12, color: COLORS.textSecondary },
-  ratingTxt: { fontSize: 12, color: COLORS.text, fontWeight: '600' },
-  statsRow: { flexDirection: 'row', gap: 10 },
+  ratingTxt: { fontSize: 13, color: COLORS.text, fontWeight: '700' },
+  rateLink: { marginLeft: 8, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: COLORS.primary + '10', borderRadius: 20 },
+  rateLinkText: { fontSize: 11, color: COLORS.primary, fontWeight: '700' },
+  statsRow: { flexDirection: 'row', gap: 12, marginTop: 8 },
   statCard: { flex: 1, backgroundColor: COLORS.surface, borderRadius: 12, padding: 12, alignItems: 'center', gap: 5, borderWidth: 1, borderColor: COLORS.border },
   statIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   statValue: { fontSize: 18, fontWeight: '800', color: COLORS.text },

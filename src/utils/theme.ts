@@ -73,3 +73,7 @@ export const theme = {
     },
   },
 } as const;
+
+// Re-export colors as COLORS for backward compatibility
+// All new code should import from constants.ts directly
+// This file provides extended tokens (spacing, radius, typography, shadow)

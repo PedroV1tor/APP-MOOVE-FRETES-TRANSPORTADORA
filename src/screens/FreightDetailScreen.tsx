@@ -33,7 +33,7 @@ export function FreightDetailScreen() {
   if (!freight) return null;
 
   const freightCode = freight.freight_code || generateFreightCode(freight.id);
-  const isOwn = freight.publisher_id === user?.id;
+  const isOwn = (freight as any).publisher_id === user?.id || freight.company_id === user?.id;
 
   function handleWhatsApp() {
     Vibration.vibrate(40);
@@ -56,29 +56,32 @@ export function FreightDetailScreen() {
   }
 
   function handleOpenMaps() {
-    const { city, state } = freight.destination;
-    Linking.openURL(`https://maps.google.com/?q=${city},${state},Brasil`);
+    const city = freight.destination?.city || '';
+    const state = freight.destination?.state || '';
+    if (!city) return;
+    Linking.openURL(`https://maps.google.com/?q=${encodeURIComponent(`${city},${state},Brasil`)}`);
   }
 
   function handleChat() {
     Vibration.vibrate(40);
-    navigation.navigate('ChatTab', {
-      screen: 'Chat',
-      params: {
-        userId: freight.company_id,
-        userName: freight.company_name || 'Embarcador',
-        source: 'freight',
-        sourceId: freight.id,
-        originCity: freight.origin?.city,
-        originState: freight.origin?.state,
-        destinationCity: freight.destination?.city,
-        destinationState: freight.destination?.state,
-        initialMessage: `Olá, tenho interesse no frete ${freightCode}.\n\n📦 ${formatLocation(freight.origin)} → ${formatLocation(freight.destination)}\nProduto: ${freight.product || freight.cargo_type || 'Não especificado'}\n\nA carga ainda está disponível? 🚚`,
-      },
+    navigation.navigate('Chat', {
+      userId: freight.company_id,
+      userName: freight.company_name || 'Embarcador',
+      source: 'freight',
+      sourceId: freight.id,
+      originCity: freight.origin?.city,
+      originState: freight.origin?.state,
+      destinationCity: freight.destination?.city,
+      destinationState: freight.destination?.state,
+      initialMessage: `Olá, tenho interesse no frete ${freightCode}.\n\n📦 ${formatLocation(freight.origin)} → ${formatLocation(freight.destination)}\nProduto: ${freight.product || freight.cargo_type || 'Não especificado'}\n\nA carga ainda está disponível? 🚚`,
     });
   }
 
   function handleDelete() {
+    if (!isOwn) {
+      Alert.alert('Erro', 'Você não tem permissão para excluir este frete.');
+      return;
+    }
     Alert.alert(
       'Apagar Frete',
       'Tem certeza que deseja apagar este frete permanentemente?',

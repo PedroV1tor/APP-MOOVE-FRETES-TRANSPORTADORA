@@ -12,11 +12,13 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { COLORS } from '../utils/constants';
 import { getSupabaseAvatarUrl, formatPhone } from '../utils/helpers';
+import { useToast } from '../contexts/ToastContext';
 
 export function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
-  const { user, signOut, refreshCompany } = useAuth();
+   const { user, signOut, refreshCompany, refreshUserData } = useAuth();
+  const { showToast } = useToast();
   const [showEditModal, setShowEditModal] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
@@ -42,8 +44,10 @@ export function ProfileScreen() {
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.7,
+      quality: 0.5,
       base64: true,
+      width: 400,
+      height: 400,
     });
 
     if (result.canceled || !result.assets[0]?.base64) return;
@@ -69,10 +73,10 @@ export function ProfileScreen() {
         supabase.from('companies').update({ logo: filePath }).eq('user_id', user?.id),
       ]);
 
-      await refreshCompany();
-      Alert.alert('Sucesso', 'Foto atualizada com sucesso!');
+      await refreshUserData();
+      showToast('Foto atualizada com sucesso!');
     } catch (err: any) {
-      Alert.alert('Erro', err.message || 'Falha ao enviar foto.');
+      showToast(err.message || 'Falha ao enviar foto.', 'error');
     } finally {
       setUploadingAvatar(false);
     }

@@ -32,66 +32,45 @@ export function HomeScreen() {
   const load = useCallback(async () => {
     if (!user) return;
     try {
-      // 1. Active Freights
-      const { count: activeFreightsCount } = await supabase
-        .from('freights')
-        .select('*', { count: 'exact', head: true })
-        .eq('publisher_id', user.id)
-        .neq('status', 'cancelled')
-        .neq('status', 'inactive');
-
-      // 2. Connected Drivers
-      const { count: connectedDriversCount } = await supabase
-        .from('drivers')
-        .select('*', { count: 'exact', head: true });
-
-      // 3. Unread Messages
-      const { data: myConvs } = await supabase
-        .from('conversations')
-        .select('id')
-        .or(`participant1_id.eq.${user.id},participant2_id.eq.${user.id}`);
-
-      let unreadMessages = 0;
-      if (myConvs && myConvs.length > 0) {
-        const convIds = myConvs.map(c => c.id);
-        const { count } = await supabase
-          .from('messages')
+      // Optimized: use RPC to get all stats in one trip
+      const { data, error } = await supabase.rpc('get_carrier_dashboard_stats', { p_user_id: user.id });
+      
+      if (data && !error) {
+        setStats({
+          activeFreights: data.activeFreights || 0,
+          connectedDrivers: data.availableDrivers || 0,
+          monthlyRevenue: data.monthlyRevenue || 0,
+          unreadMessages: data.unreadMessages || 0,
+        });
+      } else {
+        // Fallback to manual queries if RPC fails (e.g. migration not applied yet)
+        console.warn('[HomeScreen] RPC failed, falling back to manual queries');
+        
+        const { count: activeFreightsCount } = await supabase
+          .from('freights')
           .select('*', { count: 'exact', head: true })
-          .in('conversation_id', convIds)
+          .eq('publisher_id', user.id)
+          .neq('status', 'cancelled')
+          .neq('status', 'inactive');
+
+        const { count: connectedDriversCount } = await supabase
+          .from('drivers')
+          .select('*', { count: 'exact', head: true })
+          .eq('available', true);
+
+        const { count: unreadMsgCount } = await supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
           .neq('sender_id', user.id)
           .eq('is_read', false);
-        unreadMessages = count || 0;
+
+        setStats(prev => ({
+          ...prev,
+          activeFreights: activeFreightsCount || 0,
+          connectedDrivers: connectedDriversCount || 0,
+          unreadMessages: unreadMsgCount || 0,
+        }));
       }
-
-      // 4. Monthly Revenue — fretes concluídos no mês atual
-      const monthStart = new Date();
-      monthStart.setDate(1);
-      monthStart.setHours(0, 0, 0, 0);
-      const { data: completedFreights } = await supabase
-        .from('freights')
-        .select('value_estimate, metadata')
-        .eq('publisher_id', user.id)
-        .in('status', ['completed', 'contracted'])
-        .gte('updated_at', monthStart.toISOString());
-
-      let monthlyRevenue = 0;
-      if (completedFreights) {
-        for (const f of completedFreights) {
-          if (f.value_estimate != null) {
-            monthlyRevenue += Number(f.value_estimate) || 0;
-          } else if (f.metadata?.price) {
-            const raw = String(f.metadata.price).replace(/R\$\s?/g, '').replace(/\./g, '').replace(',', '.').trim();
-            monthlyRevenue += parseFloat(raw) || 0;
-          }
-        }
-      }
-
-      setStats({
-        activeFreights: activeFreightsCount || 0,
-        connectedDrivers: connectedDriversCount || 0,
-        monthlyRevenue,
-        unreadMessages,
-      });
     } finally {
       setLoading(false);
     }

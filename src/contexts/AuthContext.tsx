@@ -16,6 +16,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshCompany: () => Promise<void>;
+  refreshUserData: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -49,7 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const [profileResult, companyResult] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', userId).single(),
-        supabase.from('companies').select('*').eq('user_id', userId).single(),
+        supabase.from('companies').select('*').eq('user_id', userId).limit(1).maybeSingle(),
       ]);
 
       if (profileResult.error) console.warn('[AuthContext] Profile load error:', profileResult.error.message);
@@ -84,18 +85,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function refreshCompany() {
     if (!user) return;
-    const { data } = await supabase
-      .from('companies')
-      .select('*')
-      .eq('user_id', user.id)
-      .single();
-    if (data) {
-      setUser(prev => prev ? { ...prev, company: data } : prev);
-    }
+    const [companyRes, profileRes] = await Promise.all([
+      supabase.from('companies').select('*').eq('user_id', user.id).limit(1).maybeSingle(),
+      supabase.from('profiles').select('*').eq('id', user.id).single(),
+    ]);
+    setUser(prev => prev ? {
+      ...prev,
+      company: companyRes.data || prev.company,
+      profile: profileRes.data || prev.profile,
+    } : prev);
+  }
+
+  async function refreshUserData() {
+    if (!user) return;
+    await loadUserData(user.id, user.email);
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut, refreshCompany }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signOut, refreshCompany, refreshUserData }}>
       {children}
     </AuthContext.Provider>
   );

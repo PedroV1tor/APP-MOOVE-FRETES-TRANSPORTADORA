@@ -18,6 +18,7 @@ interface Notification {
   message: string;
   type: string;
   is_read: boolean;
+  related_id?: string;
   created_at: string;
 }
 
@@ -55,7 +56,7 @@ export function NotificationsScreen() {
     if (!user) return;
 
     const channel = supabase
-      .channel('notifications-realtime')
+      .channel(`notifications-realtime-${Date.now()}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
@@ -74,9 +75,28 @@ export function NotificationsScreen() {
     setRefreshing(false);
   }
 
-  async function handleMarkRead(id: string) {
-    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+  async function handleMarkRead(notif: Notification) {
+    if (!notif.is_read) {
+      await supabase.from('notifications').update({ is_read: true }).eq('id', notif.id);
+      setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n));
+    }
+
+    // Navigate based on notification type
+    if (notif.related_id) {
+      switch (notif.type) {
+        case 'message':
+          navigation.navigate('Chat', { conversationId: notif.related_id, userId: '', userName: '' });
+          break;
+        case 'freight':
+          navigation.navigate('FreightDetail', { freight: { id: notif.related_id } });
+          break;
+        case 'rating':
+          navigation.navigate('Main', { screen: 'ProfileTab' });
+          break;
+        default:
+          break;
+      }
+    }
   }
 
   async function handleMarkAllRead() {
@@ -114,7 +134,7 @@ export function NotificationsScreen() {
             return (
               <TouchableOpacity
                 style={[styles.item, !item.is_read && styles.itemUnread]}
-                onPress={() => handleMarkRead(item.id)}
+                onPress={() => handleMarkRead(item)}
                 activeOpacity={0.7}
               >
                 <View style={[styles.iconWrap, { backgroundColor: iconInfo.color + '15' }]}>

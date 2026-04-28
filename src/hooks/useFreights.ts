@@ -11,7 +11,6 @@ async function fetchFreightsPage(publisherId: string | null, cursor: string | nu
     .from('freights')
     .select('*')
     .eq('publisher_id', publisherId)
-    .neq('status', 'inactive')
     .order('created_at', { ascending: false })
     .limit(PAGE_SIZE);
 

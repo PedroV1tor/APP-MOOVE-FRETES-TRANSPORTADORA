@@ -63,15 +63,28 @@ export function ChatListScreen() {
     setTimeout(() => {
       Alert.alert(
         'Apagar Conversa',
-        'Tem certeza que deseja apagar esta conversa permanentemente?',
+        'Deseja ocultar esta conversa? Você não a verá mais, mas o histórico continuará disponível para o outro participante.',
         [
           { text: 'Cancelar', style: 'cancel' },
           { 
             text: 'Apagar', 
             style: 'destructive',
             onPress: async () => {
-              await supabase.from('messages').delete().eq('conversation_id', conv.conversationId);
-              const { error } = await supabase.from('conversations').delete().eq('id', conv.conversationId);
+              // Soft delete: determine which participant we are
+              const { data: convData } = await supabase
+                .from('conversations')
+                .select('participant1_id')
+                .eq('id', conv.conversationId)
+                .single();
+              
+              const isP1 = convData?.participant1_id === user?.id;
+              const column = isP1 ? 'deleted_by_participant1' : 'deleted_by_participant2';
+              
+              const { error } = await supabase
+                .from('conversations')
+                .update({ [column]: true })
+                .eq('id', conv.conversationId);
+
               if (error) {
                 Alert.alert('Erro', 'Não foi possível apagar a conversa.');
               } else {
@@ -87,11 +100,22 @@ export function ChatListScreen() {
   const load = useCallback(async () => {
     if (!user) return;
     try {
-      const { data: convs } = await supabase
+      // 1. Get conversations not soft-deleted by current user
+      const { data: allConvs, error } = await supabase
         .from('conversations')
         .select('*')
         .or(`participant1_id.eq.${user.id},participant2_id.eq.${user.id}`)
         .order('last_message_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching conversations:', error);
+      }
+
+      const convs = (allConvs || []).filter(c => {
+        if (c.participant1_id === user.id) return c.deleted_by_participant1 !== true;
+        if (c.participant2_id === user.id) return c.deleted_by_participant2 !== true;
+        return false;
+      });
 
       if (!convs || convs.length === 0) {
         setConversations([]);
@@ -103,6 +127,7 @@ export function ChatListScreen() {
         c.participant1_id === user.id ? c.participant2_id : c.participant1_id
       ).filter(Boolean);
 
+      // 2. Load Profiles, last messages and unread counts
       const [profilesRes, lastMsgsRes, unreadRes] = await Promise.all([
         supabase
           .from('profiles')
@@ -144,7 +169,7 @@ export function ChatListScreen() {
         const otherId = isP1 ? c.participant2_id : c.participant1_id;
         const profile = profileMap.get(otherId);
         const lastMsg = lastMsgMap.get(c.id);
-        
+
         // In order to bypass a server-side DB bug, ChatScreen saves source as 'direct' and puts the real source in metadata
         const realSource = (c.source === 'direct' && c.metadata?.original_source) ? c.metadata.original_source : c.source;
 
@@ -185,16 +210,28 @@ export function ChatListScreen() {
 
   useEffect(() => {
     if (!user) return;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedLoad = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => load(), 800);
+    };
     const channel = supabase
       .channel(`chat-list-${Date.now()}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
-        load();
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        // Only reload if the message involves a conversation we might be in
+        const msg = payload.new as any;
+        if (msg.sender_id !== user.id || msg.sender_id === user.id) {
+          debouncedLoad();
+        }
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: 'is_read=eq.true' }, () => {
-        load();
+        debouncedLoad();
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      supabase.removeChannel(channel);
+    };
   }, [user, load]);
 
   async function handleRefresh() {

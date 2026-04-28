@@ -213,6 +213,11 @@ export function FreightsScreen() {
           text: 'Excluir',
           style: 'destructive',
           onPress: async () => {
+            // Verify ownership before delete
+            if ((freight as any).publisher_id !== user?.id && freight.company_id !== user?.id) {
+              Alert.alert('Erro', 'Você não tem permissão para excluir este frete.');
+              return;
+            }
             setMutating(true);
             try {
               await supabase.from('freights').delete().eq('id', freight.id);
@@ -379,6 +384,11 @@ export function FreightsScreen() {
                   onAction={() => openAction(item)}
                 />
               )}
+              getItemLayout={(_, index) => ({
+                length: 120, // Estimated card height
+                offset: 120 * index,
+                index,
+              })}
               ListFooterComponent={
                 mineData.completed.length > 0 ? (
                   <CompletedSection
@@ -413,7 +423,7 @@ export function FreightsScreen() {
 
       {/* FAB — visível em ambas as abas */}
       <TouchableOpacity
-        style={[styles.fab, { bottom: insets.bottom - 4 }]}
+        style={[styles.fab, { bottom: Math.max(insets.bottom, 16) }]}
         onPress={() => navigation.navigate('CreateFreight')}
         activeOpacity={0.85}
       >
@@ -550,11 +560,11 @@ export function FreightsScreen() {
 }
 
 // ── MyFreightCard ──────────────────────────────────────────────────
-function MyFreightCard({ freight, onPress, onAction }: {
+const MyFreightCard = React.memo(({ freight, onPress, onAction }: {
   freight: Freight;
   onPress: () => void;
   onAction: () => void;
-}) {
+}) => {
   const origin = formatLocation(freight.origin);
   const dest = formatLocation(freight.destination);
   const price = formatCurrency(freight.price);
@@ -619,15 +629,15 @@ function MyFreightCard({ freight, onPress, onAction }: {
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 // ── CompletedSection ───────────────────────────────────────────────
-function CompletedSection({ freights, expanded, onToggle, onPress }: {
+const CompletedSection = React.memo(({ freights, expanded, onToggle, onPress }: {
   freights: Freight[];
   expanded: boolean;
   onToggle: () => void;
   onPress: (f: Freight) => void;
-}) {
+}) => {
   return (
     <View style={completed.container}>
       <TouchableOpacity style={completed.toggle} onPress={onToggle} activeOpacity={0.85}>
@@ -652,7 +662,7 @@ function CompletedSection({ freights, expanded, onToggle, onPress }: {
       ))}
     </View>
   );
-}
+});
 
 // ── ActionItem ─────────────────────────────────────────────────────
 function ActionItem({ icon, iconColor, label, labelColor, onPress }: {
