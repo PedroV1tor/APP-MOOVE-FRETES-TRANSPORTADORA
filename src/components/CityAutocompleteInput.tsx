@@ -15,6 +15,7 @@ interface Props {
   placeholder?: string;
   value: string;
   onSelect: (city: string, stateCode: string) => void;
+  disabled?: boolean;
 }
 
 const CITY_CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
@@ -29,7 +30,7 @@ function getCachedCities(): any[] | null {
   return cityCache.data;
 }
 
-export function CityAutocompleteInput({ placeholder = 'Digite o nome da cidade', value, onSelect }: Props) {
+export function CityAutocompleteInput({ placeholder = 'Digite o nome da cidade', value, onSelect, disabled }: Props) {
   const [query, setQuery] = useState(value);
   const [suggestions, setSuggestions] = useState<CitySuggestion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -109,7 +110,7 @@ export function CityAutocompleteInput({ placeholder = 'Digite o nome da cidade',
 
   return (
     <View>
-      <View style={styles.inputBox}>
+      <View style={[styles.inputBox, disabled && styles.inputBoxDisabled]}>
         <Ionicons name="location-outline" size={16} color={COLORS.textSecondary} />
         <TextInput
           style={styles.input}
@@ -119,10 +120,11 @@ export function CityAutocompleteInput({ placeholder = 'Digite o nome da cidade',
           onChangeText={handleChange}
           autoCorrect={false}
           autoCapitalize="words"
+          editable={!disabled}
         />
         {loading ? (
           <ActivityIndicator size="small" color={COLORS.primary} />
-        ) : query.length > 0 ? (
+        ) : (query.length > 0 && !disabled) ? (
           <TouchableOpacity onPress={handleClear}>
             <Ionicons name="close-circle" size={16} color={COLORS.textSecondary} />
           </TouchableOpacity>
@@ -165,6 +167,10 @@ const styles = StyleSheet.create({
     gap: 8,
     borderWidth: 1,
     borderColor: COLORS.border,
+  },
+  inputBoxDisabled: {
+    backgroundColor: '#f3f4f6',
+    borderColor: '#e5e7eb',
   },
   input: { flex: 1, fontSize: 14, color: COLORS.text },
   dropdown: {

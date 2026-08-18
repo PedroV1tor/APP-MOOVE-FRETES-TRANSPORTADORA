@@ -13,6 +13,7 @@ import { supabase } from '../lib/supabase';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { SignUpScreen } from '../screens/auth/SignUpScreen';
 import { ResetPasswordScreen } from '../screens/auth/ResetPasswordScreen';
+import { AccessDeniedScreen } from '../screens/auth/AccessDeniedScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { FreightsScreen } from '../screens/FreightsScreen';
 import { FreightDetailScreen } from '../screens/FreightDetailScreen';
@@ -153,6 +154,12 @@ const linking = {
   },
 };
 
+const ALLOWED_USER_TYPES = ['transportadora', 'embarcador', 'agenciador', 'shipper', 'carrier', 'collaborator'];
+
+function isAllowedUser(userType: string | null | undefined): boolean {
+  return !!userType && ALLOWED_USER_TYPES.includes(userType);
+}
+
 export function AppNavigator() {
   const { user, loading } = useAuth();
 
@@ -164,10 +171,15 @@ export function AppNavigator() {
     );
   }
 
+  const authenticated = !!user;
+  const allowed = authenticated && isAllowedUser(user.profile?.user_type);
+
   return (
     <NavigationContainer linking={linking} ref={navigationRef}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {user ? (
+        {authenticated && !allowed ? (
+          <Stack.Screen name="AccessDenied" component={AccessDeniedScreen} />
+        ) : allowed ? (
           <>
             <Stack.Screen name="Main"            component={MainTabs} />
             <Stack.Screen name="FreightDetail"   component={FreightDetailScreen} />

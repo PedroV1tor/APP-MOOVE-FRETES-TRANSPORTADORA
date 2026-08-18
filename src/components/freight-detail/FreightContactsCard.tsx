@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Clipboard, Vibration, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../utils/constants';
 import { formatLocation } from '../../utils/helpers';
+import { supabase } from '../../lib/supabase';
 import type { Freight } from '../../types';
 
 interface Props {
@@ -11,8 +12,35 @@ interface Props {
 }
 
 export function FreightContactsCard({ freight, freightCode }: Props) {
-  const contacts = freight.responsibleContacts;
-  if (!contacts || contacts.length === 0) return null;
+  const [contacts, setContacts] = useState<any[]>([]);
+
+  useEffect(() => {
+    async function load() {
+      if (!freight.id) return;
+      const { data } = await supabase
+        .from('freight_responsible_contacts')
+        .select('*')
+        .eq('freight_id', freight.id)
+        .order('is_main_contact', { ascending: false });
+
+      if (data && data.length > 0) {
+        setContacts(data.map(c => ({
+          id: c.id,
+          name: c.contact_name,
+          email: c.contact_email,
+          phone: c.contact_phone,
+          isMainContact: c.is_main_contact,
+          source: c.source,
+        })));
+      } else {
+        // fallback para contatos salvos no metadata
+        setContacts(freight.responsibleContacts || []);
+      }
+    }
+    load();
+  }, [freight.id]);
+
+  if (contacts.length === 0) return null;
 
   function handleCopyPhone(phone: string) {
     Vibration.vibrate(40);

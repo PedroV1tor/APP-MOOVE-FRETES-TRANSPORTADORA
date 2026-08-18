@@ -317,8 +317,8 @@ export function CreateFreightScreen() {
       Alert.alert('Atenção', 'Selecione o tipo de carga e a espécie');
       return;
     }
-    if (!totalWeight || !volumes) {
-      Alert.alert('Atenção', 'Informe o peso total e a quantidade de volumes');
+    if (!totalWeight) {
+      Alert.alert('Atenção', 'Informe o peso total');
       return;
     }
     
@@ -354,10 +354,7 @@ export function CreateFreightScreen() {
       return;
     }
 
-    if (!observations || observations.length < 5) {
-      Alert.alert('Atenção', 'Adicione uma observação (mínimo 5 caracteres) para ajudar o motorista');
-      return;
-    }
+
 
     if (asScheduled && !scheduledDate) {
       Alert.alert('Atenção', 'Selecione uma data de coleta para agendar o frete');
@@ -384,6 +381,20 @@ export function CreateFreightScreen() {
     }
     if (deliveryDate && !deliveryDateISO) {
       Alert.alert('Data Inválida', 'A data de entrega deve estar no formato DD/MM/AAAA');
+      return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    if (pickupDateISO && pickupDateISO < today) {
+      Alert.alert('Data Inválida', 'A data de coleta não pode ser no passado');
+      return;
+    }
+    if (deliveryDateISO && deliveryDateISO < today) {
+      Alert.alert('Data Inválida', 'A data de entrega não pode ser no passado');
+      return;
+    }
+    if (pickupDateISO && deliveryDateISO && deliveryDateISO < pickupDateISO) {
+      Alert.alert('Data Inválida', 'A data de entrega não pode ser anterior à data de coleta');
       return;
     }
 
@@ -456,14 +467,33 @@ export function CreateFreightScreen() {
         },
       };
 
-      let error;
+      let freightId: string | null = isEditing ? editFreight.id : null;
+
       if (isEditing && editFreight?.id) {
-        ({ error } = await supabase.from('freights').update(freightData).eq('id', editFreight.id));
+        const { error } = await supabase.from('freights').update(freightData).eq('id', editFreight.id);
+        if (error) throw error;
       } else {
-        ({ error } = await supabase.from('freights').insert(freightData));
+        const { data: inserted, error } = await supabase.from('freights').insert(freightData).select('id').single();
+        if (error) throw error;
+        freightId = inserted?.id || null;
       }
 
-      if (error) throw error;
+      // Salvar contatos responsáveis na tabela dedicada (igual ao MooveFretes)
+      if (freightId && responsibleContacts.length > 0) {
+        await supabase.from('freight_responsible_contacts').delete().eq('freight_id', freightId);
+        await supabase.from('freight_responsible_contacts').insert(
+          responsibleContacts.map(c => ({
+            freight_id: freightId,
+            contact_name: c.name,
+            contact_email: c.email || null,
+            contact_phone: c.phone,
+            is_main_contact: c.isMainContact ?? false,
+            source: c.source || 'manual',
+            source_id: c.savedContactId || (c.source === 'collaborator' ? c.id : null),
+          }))
+        );
+      }
+
       Alert.alert(
         'Sucesso',
         isEditing ? 'Frete atualizado com sucesso!' : (asScheduled ? 'Frete agendado com sucesso!' : 'Frete publicado com sucesso!')
@@ -501,30 +531,29 @@ export function CreateFreightScreen() {
         <SectionCard 
           icon="map-outline" 
           title="A Rota" 
-          subtitle="Origem, destino e previsão de datas"
+          subtitle={isEditing ? "Origem, destino e datas não podem ser alterados" : "Origem, destino e previsão de datas"}
         >
-          <View style={s.fieldGroup}>
-            <FieldLabel>Cidade de Coleta *</FieldLabel>
-            <CityAutocompleteInput
-              placeholder="Ex: São Paulo, SP"
-              value={originCity ? `${originCity}${originState ? ` - ${originState}` : ''}` : ''}
-              onSelect={(city, state) => { setOriginCity(city); setOriginState(state); }}
-            />
+          <View style={{ gap: 6 }}>
+            <View>
+              <FieldLabel>Cidade de Coleta *</FieldLabel>
+              <CityAutocompleteInput
+                placeholder="Ex: São Paulo, SP"
+                value={originCity ? `${originCity}${originState ? ` - ${originState}` : ''}` : ''}
+                onSelect={(city, state) => { setOriginCity(city); setOriginState(state); }}
+                disabled={isEditing}
+              />
+            </View>
+
+            <View>
+              <FieldLabel>Cidade de Entrega *</FieldLabel>
+              <CityAutocompleteInput
+                placeholder="Ex: Curitiba, PR"
+                value={destinationCity ? `${destinationCity}${destinationState ? ` - ${destinationState}` : ''}` : ''}
+                onSelect={(city, state) => { setDestinationCity(city); setDestinationState(state); }}
+                disabled={isEditing}
+              />
+            </View>
           </View>
-
-
-
-          <View style={[s.divider, { marginVertical: 8, height: 0.5 }]} />
-
-          <View style={s.fieldGroup}>
-            <FieldLabel>Cidade de Entrega *</FieldLabel>
-            <CityAutocompleteInput
-              placeholder="Ex: Curitiba, PR"
-              value={destinationCity ? `${destinationCity}${destinationState ? ` - ${destinationState}` : ''}` : ''}
-              onSelect={(city, state) => { setDestinationCity(city); setDestinationState(state); }}
-            />
-          </View>
-
 
 
           <View style={s.row}>
@@ -537,6 +566,7 @@ export function CreateFreightScreen() {
                 keyboardType="numeric"
                 icon="calendar-outline"
                 maxLength={10}
+                editable={!isEditing}
               />
             </View>
             <View style={[s.fieldGroup, { flex: 1, marginLeft: 8 }]}>
@@ -548,6 +578,7 @@ export function CreateFreightScreen() {
                 keyboardType="numeric"
                 icon="calendar-outline"
                 maxLength={10}
+                editable={!isEditing}
               />
             </View>
           </View>
@@ -775,6 +806,9 @@ export function CreateFreightScreen() {
                     value={tollPayment}
                     onChange={v => setTollPayment(v as any)}
                   />
+                  <Text style={{ fontSize: 11, color: '#ea742a', fontWeight: '600', marginTop: 4 }}>
+                    Nota: O pedágio sempre deve ser pago a parte.
+                  </Text>
                 </View>
                 <View style={[s.fieldGroup, { flex: 1, marginLeft: 8 }]}>
                   <FieldLabel>Adiantamento %</FieldLabel>
@@ -891,24 +925,22 @@ export function CreateFreightScreen() {
 
 
 
-        <SectionCard 
-          icon="chatbox-ellipses-outline" 
+        <SectionCard
+          icon="chatbox-ellipses-outline"
           title="Informações Adicionais"
+          subtitle="Orientações para o motorista"
         >
-
-          <View style={s.fieldGroup}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-              <FieldLabel>Observações</FieldLabel>
-              <Text style={s.charCount}>{observations.length}/500</Text>
-            </View>
-            <InputBox
-              value={observations}
-              onChangeText={(t: string) => { if (t.length <= 500) setObservations(t); }}
-              placeholder="Detalhes que ajudam o motorista..."
-              multiline
-              maxLength={500}
-            />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <FieldLabel>Observações</FieldLabel>
+            <Text style={s.charCount}>{observations.length}/500</Text>
           </View>
+          <InputBox
+            value={observations}
+            onChangeText={(t: string) => { if (t.length <= 500) setObservations(t); }}
+            placeholder="Ex: Carga paletizada, necessário ajudante de carga, agendar coleta com antecedência..."
+            multiline
+            maxLength={500}
+          />
         </SectionCard>
 
         {/* ── Ações ────────────────────────────────────────────────────────── */}

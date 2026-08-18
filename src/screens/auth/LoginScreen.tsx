@@ -16,6 +16,7 @@ export function LoginScreen() {
   const navigation = useNavigation<any>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [userType, setUserType] = useState<'caminhoneiro' | 'transportadora'>('transportadora');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
@@ -80,6 +81,28 @@ export function LoginScreen() {
 
           <View style={styles.form}>
           <Text style={styles.welcome}>Área da Transportadora</Text>
+
+          {/* Seletor de tipo de usuário */}
+          <View style={styles.userTypeSelector}>
+            <Text style={styles.userTypeLabel}>Entrar como:</Text>
+            <View style={styles.userTypeRow}>
+              <TouchableOpacity
+                style={[styles.userTypeBtn, userType === 'caminhoneiro' && styles.userTypeBtnActive]}
+                onPress={() => setUserType('caminhoneiro')}
+              >
+                <Ionicons name="truck-outline" size={20} color={userType === 'caminhoneiro' ? '#fff' : COLORS.textSecondary} />
+                <Text style={[styles.userTypeBtnText, userType === 'caminhoneiro' && styles.userTypeBtnTextActive]}>Motorista</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.userTypeBtn, userType === 'transportadora' && styles.userTypeBtnActive]}
+                onPress={() => setUserType('transportadora')}
+              >
+                <Ionicons name="business-outline" size={20} color={userType === 'transportadora' ? '#fff' : COLORS.textSecondary} />
+                <Text style={[styles.userTypeBtnText, userType === 'transportadora' && styles.userTypeBtnTextActive]}>Empresa</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>E-mail</Text>
@@ -195,6 +218,44 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.text,
     textAlign: 'center',
+  },
+  userTypeSelector: {
+    marginBottom: 8,
+  },
+  userTypeLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  userTypeRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  userTypeBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.background,
+  },
+  userTypeBtnActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  userTypeBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  userTypeBtnTextActive: {
+    color: '#fff',
   },
   inputGroup: { gap: 6 },
   label: {

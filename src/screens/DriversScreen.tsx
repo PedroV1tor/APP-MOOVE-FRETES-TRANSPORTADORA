@@ -143,7 +143,9 @@ export function DriversScreen() {
     if (filters.minRating !== '' && (d.rating || 0) < Number(filters.minRating)) return false;
     if (filters.city.trim()) {
       const driverCity = d.current_location?.city || '';
-      if (!driverCity.toLowerCase().includes(filters.city.toLowerCase())) return false;
+      if (!driverCity || !driverCity.toLowerCase().includes(filters.city.toLowerCase())) return false;
+      const expires = (d as any).availability_expires_at;
+      if (!expires || new Date(expires) < new Date()) return false;
     }
     if (filters.searchQuery.trim()) {
       if (!d.name.toLowerCase().includes(filters.searchQuery.toLowerCase())) return false;
@@ -219,10 +221,12 @@ export function DriversScreen() {
             <DriverCard
               driver={item}
               onPress={() => navigation.navigate('DriverDetail', { driver: item })}
-              onChat={() => navigation.navigate('Chat', {
-                userId: item.user_id,
-                userName: item.name,
-                userAvatar: item.profile_image,
+              onChat={() => navigation.navigate('Main', {
+                screen: 'ChatTab',
+                params: {
+                  screen: 'Chat',
+                  params: { userId: item.user_id, userName: item.name, userAvatar: item.profile_image },
+                },
               })}
               onWhatsApp={() => {
                 if (item.phone) Linking.openURL(`https://wa.me/55${item.phone.replace(/\D/g, '')}`);

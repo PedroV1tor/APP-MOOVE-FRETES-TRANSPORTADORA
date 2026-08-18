@@ -140,7 +140,10 @@ export function DriverDetailScreen() {
 
   function handleChat() {
     Vibration.vibrate(40);
-    navigation.navigate('Chat', { userId: driver.user_id, userName: driver.name, userAvatar: driver.profile_image });
+    navigation.navigate('Main', {
+      screen: 'ChatTab',
+      params: { screen: 'Chat', params: { userId: driver.user_id, userName: driver.name, userAvatar: driver.profile_image } },
+    });
   }
 
   return (

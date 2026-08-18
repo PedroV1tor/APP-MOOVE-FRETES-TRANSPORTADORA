@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform, Modal, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../utils/constants';
 
@@ -33,12 +33,12 @@ export function FieldLabel({ children, required }: { children: React.ReactNode; 
 }
 
 // ── InputBox ──────────────────────────────────────────────────
-export function InputBox({ icon, ...props }: any) {
+export function InputBox({ icon, style, ...props }: any) {
   return (
-    <View style={styles.inputWrapper}>
-      {icon && <Ionicons name={icon} size={18} color={COLORS.textSecondary} style={{ marginRight: 8 }} />}
+    <View style={[styles.inputWrapper, props.multiline && styles.inputWrapperMulti]}>
+      {icon && <Ionicons name={icon} size={18} color={COLORS.textSecondary} style={{ marginRight: 8, marginTop: props.multiline ? 2 : 0 }} />}
       <TextInput
-        style={[styles.input, props.multiline && { height: 80, textAlignVertical: 'top' }]}
+        style={[styles.input, props.multiline && styles.inputMultiline, style]}
         placeholderTextColor={COLORS.textLight}
         {...props}
       />
@@ -88,33 +88,66 @@ export function SegmentedControl({ options, value, onChange }: {
   );
 }
 
-// ── InlineSelect ──────────────────────────────────────────────────
-export function InlineSelect({ value, options, placeholder, onSelect, icon }: any) {
+// ── InlineSelect (alias para PickerSelect) ────────────────────────
+export function InlineSelect(props: any) {
+  return <PickerSelect {...props} />;
+}
+
+// ── PickerSelect ──────────────────────────────────────────────────
+export function PickerSelect({ value, options, placeholder, onSelect }: {
+  value: string;
+  options: (string | { label: string; value: string })[];
+  placeholder?: string;
+  onSelect: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const label = options
+    .map(o => (typeof o === 'string' ? o : o.label))
+    .find((_, i) => {
+      const v = typeof options[i] === 'string' ? options[i] : (options[i] as any).value;
+      return v === value;
+    }) || value;
+
   return (
-    <View style={styles.inlineSelect}>
-      {icon && <Ionicons name={icon} size={18} color={COLORS.textSecondary} style={{ marginRight: 8 }} />}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-        {options?.map((opt: any, index: number) => {
-          const val = typeof opt === 'string' ? opt : opt?.value;
-          const label = typeof opt === 'string' ? opt : opt?.label;
-          const active = value === val;
-          const itemKey = val != null ? String(val) : `fallback-${index}`;
-          return (
-            <TouchableOpacity
-              key={itemKey}
-              style={[styles.inlineOpt, active && styles.inlineOptActive]}
-              onPress={() => onSelect(val)}
-            >
-              <Text style={[styles.inlineLabel, active && styles.inlineLabelActive]}>{label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-    </View>
+    <>
+      <TouchableOpacity style={styles.pickerBox} onPress={() => setOpen(true)} activeOpacity={0.7}>
+        <Text style={[styles.pickerText, !value && styles.pickerPlaceholder]} numberOfLines={1}>
+          {value ? label : (placeholder || 'Selecione')}
+        </Text>
+        <Ionicons name="chevron-down" size={18} color={COLORS.textSecondary} />
+      </TouchableOpacity>
+
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setOpen(false)}>
+          <View style={styles.pickerSheet}>
+            <View style={styles.pickerSheetHandle} />
+            <FlatList
+              data={options}
+              keyExtractor={(_, i) => String(i)}
+              renderItem={({ item }) => {
+                const val = typeof item === 'string' ? item : item.value;
+                const lbl = typeof item === 'string' ? item : item.label;
+                const active = value === val;
+                return (
+                  <TouchableOpacity
+                    style={[styles.pickerOption, active && styles.pickerOptionActive]}
+                    onPress={() => { onSelect(val); setOpen(false); }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.pickerOptionText, active && styles.pickerOptionTextActive]}>{lbl}</Text>
+                    {active && <Ionicons name="checkmark" size={18} color={COLORS.primary} />}
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </>
   );
 }
 
-import { ScrollView } from 'react-native';
 
 // ── YesNoToggle ──────────────────────────────────────────────────
 export function YesNoToggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
@@ -154,7 +187,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: COLORS.border,
     borderRadius: 10, paddingHorizontal: 12, height: 46, backgroundColor: COLORS.background,
   },
+  inputWrapperMulti: {
+    height: null as any, minHeight: 80, alignItems: 'flex-start', paddingVertical: 10,
+  },
   input: { flex: 1, fontSize: 14, color: COLORS.text },
+  inputMultiline: { minHeight: 80, textAlignVertical: 'top' },
   chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff' },
   chipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   chipLabel: { fontSize: 12, fontWeight: '500', color: COLORS.textSecondary },
@@ -169,6 +206,30 @@ const styles = StyleSheet.create({
   inlineOptActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   inlineLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary },
   inlineLabelActive: { color: '#fff' },
+  pickerBox: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderWidth: 1, borderColor: COLORS.border, borderRadius: 10,
+    paddingHorizontal: 12, height: 46, backgroundColor: COLORS.background,
+  },
+  pickerText: { fontSize: 14, color: COLORS.text, flex: 1 },
+  pickerPlaceholder: { color: COLORS.textLight },
+  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  pickerSheet: {
+    backgroundColor: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18,
+    maxHeight: '70%', paddingBottom: 24,
+  },
+  pickerSheetHandle: {
+    width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.border,
+    alignSelf: 'center', marginVertical: 10,
+  },
+  pickerOption: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: COLORS.borderLight,
+  },
+  pickerOptionActive: { backgroundColor: COLORS.primary + '0D' },
+  pickerOptionText: { fontSize: 14, color: COLORS.text },
+  pickerOptionTextActive: { color: COLORS.primary, fontWeight: '600' },
   yesNo: { flex: 1, gap: 6 },
   yesNoLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary },
   yesNoRow: { flexDirection: 'row', borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.border },

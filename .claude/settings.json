@@ -6,7 +6,8 @@
       "Bash(xargs grep *)",
       "Bash(find \"c:\\\\\\\\Users\\\\\\\\Clayton\\\\\\\\Documents\\\\\\\\MOOVEFRETES\\\\\\\\MooveFretes\" -type f \\\\\\( -name \"*Create*\" -o -name \"*New*\" -o -name \"*Form*\" \\\\\\) -iname \"*.tsx\" -o -iname \"*.ts\")",
       "Bash(npm audit *)",
-      "Read(//c/Users/Clayton/Documents/MOOVEFRETES/app/src/navigation/**)"
+      "Read(//c/Users/Clayton/Documents/MOOVEFRETES/app/src/navigation/**)",
+      "Bash(xargs ls *)"
     ]
   }
 }
