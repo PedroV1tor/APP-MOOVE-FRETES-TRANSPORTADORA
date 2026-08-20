@@ -38,7 +38,9 @@
           "androidMode": "default",
           "androidCollapsedTitle": "MooveFretes"
         }
-      ]
+      ],
+      "@sentry/react-native",
+      "expo-font"
     ],
     "scheme": "moovefretes",
     "extra": {
