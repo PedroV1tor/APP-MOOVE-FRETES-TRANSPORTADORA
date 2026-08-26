@@ -78,6 +78,17 @@ export function HomeScreen() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel('home-dashboard-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'freights' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, load)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user, load]);
+
   async function handleRefresh() {
     setRefreshing(true);
     await load();

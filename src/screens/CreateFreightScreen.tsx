@@ -183,7 +183,7 @@ export function CreateFreightScreen() {
         .from('collaborators')
         .select('id, name, email, phone')
         .eq('company_id', user.company.id)
-        .eq('status', 'active');
+        .eq('is_active', true);
 
       if (collaborators) {
         setCompanyCollaborators(collaborators.map(c => ({

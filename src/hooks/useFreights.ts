@@ -1,4 +1,5 @@
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { mapSupabaseFreight, fetchPublisherProfiles } from '../utils/helpers';
 
@@ -52,7 +53,28 @@ async function fetchAllFreightsPage(cursor: string | null) {
   return { items, nextCursor };
 }
 
+// Assina mudanças em `freights` no Supabase Realtime e invalida a query do
+// React Query correspondente, pra refletir sem precisar recarregar a tela —
+// tanto os fretes do próprio publisher quanto a listagem geral.
+function useFreightsRealtimeSync(queryKey: (string | null)[]) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`freights-realtime-${queryKey.join(':')}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'freights' }, () => {
+        queryClient.invalidateQueries({ queryKey });
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryKey.join(':')]);
+}
+
 export function useFreights(publisherId: string | null) {
+  useFreightsRealtimeSync(['freights', publisherId]);
+
   return useInfiniteQuery({
     queryKey: ['freights', publisherId],
     queryFn: ({ pageParam }) => fetchFreightsPage(publisherId, pageParam as string | null),
@@ -63,6 +85,8 @@ export function useFreights(publisherId: string | null) {
 }
 
 export function useAllFreights() {
+  useFreightsRealtimeSync(['freights', 'all']);
+
   return useInfiniteQuery({
     queryKey: ['freights', 'all'],
     queryFn: ({ pageParam }) => fetchAllFreightsPage(pageParam as string | null),

@@ -124,10 +124,24 @@ export function SignUpScreen({ navigation }: any) {
 
     setLoading(true);
     try {
-      // 1. Criar conta
+      // 1. Criar conta — os dados em `options.data` viram raw_user_meta_data
+      // e são lidos pelo trigger handle_new_user() (0010_handle_new_user_trigger.sql),
+      // que cria profiles/companies no insert do auth.users, sem depender de
+      // sessão autenticada (não existe sessão ainda antes da confirmação de e-mail).
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
         password,
+        options: {
+          data: {
+            name: name.trim(),
+            phone: phone.replace(/\D/g, ''),
+            user_type: 'transportadora',
+            company_name: companyName.trim(),
+            cnpj: cnpj.replace(/\D/g, '') || null,
+            city: city.trim() || null,
+            state: state.trim().toUpperCase() || null,
+          },
+        },
       });
 
       if (authError) {
@@ -142,17 +156,20 @@ export function SignUpScreen({ navigation }: any) {
       const userId = authData.user?.id;
       if (!userId) throw new Error('Falha ao criar conta');
 
-      // 2. Criar perfil
-      await supabase.from('profiles').upsert({
+      // 2. Fallback: se já existir sessão (ex: confirmação de e-mail desligada
+      // no projeto), garante que os dados fiquem atualizados mesmo se o
+      // trigger não rodar por algum motivo. Não bloqueia o cadastro se falhar
+      // (o trigger é a fonte confiável), mas loga pra facilitar debug.
+      const { error: profileError } = await supabase.from('profiles').upsert({
         id: userId,
         name: name.trim(),
         email: email.trim().toLowerCase(),
         phone: phone.replace(/\D/g, ''),
         user_type: 'transportadora',
       });
+      if (profileError) console.warn('[SignUp] Fallback profile upsert falhou (esperado sem sessão ainda):', profileError.message);
 
-      // 3. Criar empresa
-      await supabase.from('companies').insert({
+      const { error: companyError } = await supabase.from('companies').upsert({
         user_id: userId,
         company_name: companyName.trim(),
         company_type: 'transportadora',
@@ -160,8 +177,8 @@ export function SignUpScreen({ navigation }: any) {
         phone: phone.replace(/\D/g, ''),
         email: email.trim().toLowerCase(),
         address: city || state ? { city: city.trim(), state: state.trim().toUpperCase() } : null,
-        verified: false,
-      });
+      }, { onConflict: 'user_id' });
+      if (companyError) console.warn('[SignUp] Fallback company upsert falhou (esperado sem sessão ainda):', companyError.message);
 
       Alert.alert(
         'Conta Criada! 🎉',
