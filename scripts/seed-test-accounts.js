@@ -39,11 +39,28 @@ if (!supabaseUrl || !serviceRoleKey) {
   process.exit(1);
 }
 
+// Só existe UM projeto Supabase (que é produção). Criar uma conta admin com
+// senha fixa e conhecida contra ele = backdoor. Exige confirmação explícita
+// e gera uma senha aleatória por execução, impressa uma única vez.
+if (!process.argv.includes('--yes-production')) {
+  console.error(
+    'RECUSADO: este script cria uma conta admin real no projeto apontado por\n' +
+    'EXPO_PUBLIC_SUPABASE_URL. Se tem certeza, rode de novo com --yes-production.\n' +
+    'Ideal: use um projeto Supabase de staging separado, não o de produção.'
+  );
+  process.exit(1);
+}
+
 const supabase = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-const PASSWORD = 'Teste123!';
+const { randomBytes } = require('crypto');
+function randomPassword() {
+  // 24 chars base64url — ~143 bits de entropia.
+  return randomBytes(18).toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
+}
+const PASSWORD = randomPassword();
 
 const ACCOUNTS = [
   { key: 'admin', email: 'admin@moovefretes.test', name: 'Admin Teste', userType: 'transportadora', isAdmin: true },
