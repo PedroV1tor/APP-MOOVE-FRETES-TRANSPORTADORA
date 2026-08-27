@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, KeyboardAvoidingView, Platform, ActivityIndicator,
-  Vibration, Alert, Modal, Image,
+  Vibration, Alert, Modal, Image, AppState,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -15,9 +15,32 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { COLORS } from '../utils/constants';
+import { uuidv4 } from '../utils/uuid';
 import { CachedAvatar } from '../components/CachedAvatar';
 import { UserProfileModal } from '../components/UserProfileModal';
 import type { Message } from '../types';
+
+/** Quantas mensagens carregar por página (load inicial + "carregar anteriores"). */
+const PAGE_SIZE = 30;
+/** Validade da URL assinada de anexo (bucket chat-attachments é privado). */
+const SIGNED_URL_TTL = 60 * 60 * 24 * 7; // 7 dias
+
+type SendStatus = 'sending' | 'sent' | 'failed';
+
+/** Mensagem como usada localmente: a linha do banco + estado de envio + campos de anexo. */
+type ChatMessage = Message & {
+  status?: SendStatus;
+  read_at?: string | null;
+  message_type?: string;
+  attachments?: Array<{ type: string; url?: string; path?: string; filename?: string; name?: string; size?: number }>;
+};
+
+const byCreatedAt = (a: ChatMessage, b: ChatMessage) =>
+  String(a.created_at).localeCompare(String(b.created_at));
+
+/** Um insert que falhou por PK duplicada = a mensagem já está no banco (retry após timeout). */
+const isDuplicateKey = (error: any) =>
+  error?.code === '23505' || /duplicate key/i.test(error?.message || '');
 
 export function ChatScreen() {
   const insets = useSafeAreaInsets();
@@ -26,7 +49,7 @@ export function ChatScreen() {
   const { user } = useAuth();
   const {
     userId: otherUserId, userName, conversationId: initialConvId, userAvatar,
-    source: pSource, sourceId, originCity: pOriginCity, originState: pOriginState, 
+    source: pSource, sourceId, originCity: pOriginCity, originState: pOriginState,
     destinationCity: pDestinationCity, destinationState: pDestinationState,
     initialMessage,
   } = route.params || {};
@@ -38,11 +61,15 @@ export function ChatScreen() {
     destinationCity: pDestinationCity,
     destinationState: pDestinationState,
   });
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(initialConvId || null);
   const [text, setText] = useState<string>(initialMessage || '');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [showAttachOptions, setShowAttachOptions] = useState(false);
@@ -51,6 +78,10 @@ export function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const firstUnreadIndexRef = useRef<number>(-1);
   const initialScrollDoneRef = useRef<boolean>(false);
+  const lastMsgIdRef = useRef<string | null>(null);
+  /** Timestamp da mensagem mais recente que já temos — âncora do sync incremental. */
+  const newestAtRef = useRef<string | null>(null);
+  const realtimeConnectedRef = useRef(false);
 
   // Guard against concurrent calls that could create duplicate conversations
   const isCreatingConversationRef = useRef(false);
@@ -120,6 +151,21 @@ export function ChatScreen() {
         .single();
 
       if (error) {
+        // Corrida: a outra ponta criou a conversa entre o SELECT e o INSERT.
+        // Com o índice único uq_conversations_participant_pair (migration 0019)
+        // isso vira erro 23505 — basta reconsultar.
+        if (isDuplicateKey(error)) {
+          const { data: retry } = await supabase
+            .from('conversations')
+            .select('id')
+            .or(participantsFilter)
+            .order('created_at', { ascending: false })
+            .limit(1);
+          if (retry && retry.length > 0) {
+            setConversationId(retry[0].id);
+            return retry[0].id;
+          }
+        }
         console.error('[ChatScreen] Failed to create conversation:', error);
         return null;
       }
@@ -152,22 +198,36 @@ export function ChatScreen() {
     setTimeout(() => {
       Alert.alert(
         'Apagar Conversa',
-        'Tem certeza que deseja apagar esta conversa permanentemente?',
+        'Deseja ocultar esta conversa? Você não a verá mais, mas o histórico continuará disponível para o outro participante.',
         [
           { text: 'Cancelar', style: 'cancel' },
-          { 
-            text: 'Apagar', 
+          {
+            text: 'Apagar',
             style: 'destructive',
             onPress: async () => {
-              await supabase.from('messages').delete().eq('conversation_id', conversationId);
-              const { error } = await supabase.from('conversations').delete().eq('id', conversationId);
+              // Soft delete: nunca apagamos as mensagens do banco — só escondemos
+              // a conversa para o participante atual (igual ao ChatListScreen).
+              const { data: convRow } = await supabase
+                .from('conversations')
+                .select('participant1_id')
+                .eq('id', conversationId)
+                .single();
+
+              const isP1 = convRow?.participant1_id === user?.id;
+              const column = isP1 ? 'deleted_by_participant1' : 'deleted_by_participant2';
+
+              const { error } = await supabase
+                .from('conversations')
+                .update({ [column]: true })
+                .eq('id', conversationId);
+
               if (error) {
                 Alert.alert('Erro', 'Não foi possível apagar a conversa.');
               } else {
                 navigation.goBack();
               }
-            }
-          }
+            },
+          },
         ]
       );
     }, 100);
@@ -178,13 +238,16 @@ export function ChatScreen() {
     const convId = await getOrCreateConversation();
     if (!convId) { setLoading(false); return; }
 
+    // Página inicial: as PAGE_SIZE mensagens mais recentes (não a conversa toda).
     const { data } = await supabase
       .from('messages')
       .select('*')
       .eq('conversation_id', convId)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false })
+      .limit(PAGE_SIZE);
 
-    const msgs = data || [];
+    const msgs = ((data as ChatMessage[]) || []).slice().reverse();
+    setHasMore((data?.length || 0) === PAGE_SIZE);
 
     // Determine the index of the first unread message (from the other user)
     // BEFORE marking them as read, so we can scroll to it on open.
@@ -192,148 +255,342 @@ export function ChatScreen() {
     firstUnreadIndexRef.current = firstUnread;
     initialScrollDoneRef.current = false;
 
+    newestAtRef.current = msgs.length ? String(msgs[msgs.length - 1].created_at) : null;
     setMessages(msgs);
     setLoading(false);
 
-    const { data: updateData, error: updateError } = await supabase
+    const { error: updateError } = await supabase
       .from('messages')
       .update({ is_read: true })
       .eq('conversation_id', convId)
       .neq('sender_id', user.id)
-      .eq('is_read', false)
-      .select('id');
-      
-    if (updateError) {
-      if (__DEV__) console.warn('Failed to update messages read status:', updateError);
-    } else {
-      if (__DEV__) console.log('Messages marked as read:', updateData?.length || 0);
-    }
+      .eq('is_read', false);
+
+    if (updateError && __DEV__) console.warn('Failed to update messages read status:', updateError);
   }, [user, otherUserId, getOrCreateConversation]);
 
   useEffect(() => { load(); }, [load]);
 
+  const loadOlder = useCallback(async () => {
+    if (loadingOlder || !hasMore || !conversationId || messages.length === 0) return;
+    setLoadingOlder(true);
+    try {
+      const oldest = String(messages[0].created_at);
+      const { data } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .lt('created_at', oldest)
+        .order('created_at', { ascending: false })
+        .limit(PAGE_SIZE);
+
+      const older = ((data as ChatMessage[]) || []).slice().reverse();
+      setHasMore((data?.length || 0) === PAGE_SIZE);
+      setMessages(prev => {
+        const ids = new Set(prev.map(m => m.id));
+        return [...older.filter(m => !ids.has(m.id)), ...prev];
+      });
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [loadingOlder, hasMore, conversationId, messages]);
+
+  /**
+   * Sincronização incremental: busca tudo que entrou depois da nossa mensagem
+   * mais recente. Chamado quando o Realtime (re)conecta, ao voltar do
+   * background e pelo polling de fallback — garante que nenhuma mensagem
+   * "somе" da tela quando o websocket cai (4G instável na estrada).
+   */
+  const syncMissed = useCallback(async () => {
+    if (!conversationId || !user) return;
+    let query = supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+
+    if (newestAtRef.current) query = query.gt('created_at', newestAtRef.current);
+    else query = query.limit(PAGE_SIZE);
+
+    const { data } = await query;
+    const incoming = (data as ChatMessage[]) || [];
+    if (incoming.length === 0) return;
+
+    setMessages(prev => {
+      const ids = new Set(prev.map(m => m.id));
+      const merged = [...prev];
+      for (const m of incoming) if (!ids.has(m.id)) merged.push(m);
+      merged.sort(byCreatedAt);
+      return merged;
+    });
+
+    const toMarkRead = incoming.filter(m => m.sender_id !== user.id && !m.is_read).map(m => m.id);
+    if (toMarkRead.length > 0) {
+      await supabase.from('messages').update({ is_read: true }).in('id', toMarkRead);
+    }
+  }, [conversationId, user]);
+
+  // ── Realtime com reconexão + fallback de polling + resync ao voltar do background
   useEffect(() => {
     if (!conversationId || !user) return;
-    
-    // Append a unique random string to the channel name.
-    // This prevents the "cannot add postgres_changes callbacks... after subscribe()" error 
-    // that occurs if multiple instances of ChatScreen for the same conversation 
-    // are mounted in the navigation stack simultaneously.
-    const uniqueChannelName = `chat-conv-${conversationId}-${Math.random().toString(36).substring(7)}`;
-    
-    const channel = supabase
-      .channel(uniqueChannelName)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `conversation_id=eq.${conversationId}`,
-      }, (payload) => {
-        const msg = payload.new as Message;
-        if (msg.sender_id !== user.id) {
+
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let backoff = 1000;
+
+    const setConnected = (v: boolean) => {
+      realtimeConnectedRef.current = v;
+      setRealtimeConnected(v);
+    };
+
+    const connect = () => {
+      if (cancelled) return;
+      // Nome único evita o erro "cannot add postgres_changes callbacks after subscribe()"
+      // quando mais de uma instância desta tela está montada na stack.
+      const channelName = `chat-conv-${conversationId}-${Math.random().toString(36).slice(2)}`;
+
+      channel = supabase
+        .channel(channelName)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        }, (payload) => {
+          const msg = payload.new as ChatMessage;
           setMessages(prev => {
-            if (prev.some(m => m.id === msg.id)) return prev;
-            return [...prev, msg];
+            if (prev.some(m => m.id === msg.id)) {
+              // Já existe (era a nossa mensagem otimista) — só confirma o status.
+              return prev.map(m => (m.id === msg.id ? { ...m, ...msg, status: 'sent' } : m));
+            }
+            const next = [...prev, msg];
+            next.sort(byCreatedAt);
+            return next;
           });
-          supabase.from('messages').update({ is_read: true }).eq('id', msg.id);
+          if (msg.sender_id !== user.id) {
+            supabase.from('messages').update({ is_read: true }).eq('id', msg.id);
+          }
+        })
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        }, (payload) => {
+          // Recibo de leitura em tempo real: o outro leu, atualiza o ✓✓ aqui.
+          const msg = payload.new as ChatMessage;
+          setMessages(prev => prev.map(m => (
+            m.id === msg.id ? { ...m, is_read: msg.is_read, read_at: msg.read_at } : m
+          )));
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            setConnected(true);
+            backoff = 1000;
+            syncMissed(); // pega o que perdeu enquanto (re)conectava
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            setConnected(false);
+            if (!cancelled && !reconnectTimer) {
+              reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                try { if (channel) supabase.removeChannel(channel); } catch {}
+                connect();
+              }, backoff);
+              backoff = Math.min(backoff * 2, 30000);
+            }
+          }
+        });
+    };
+
+    connect();
+
+    // Fallback: enquanto o Realtime está fora, puxa mensagens a cada 8s.
+    const fastPoll = setInterval(() => {
+      if (!cancelled && !realtimeConnectedRef.current) syncMissed();
+    }, 8000);
+    // Rede de segurança: resync a cada 45s mesmo com o Realtime "conectado".
+    const slowPoll = setInterval(() => {
+      if (!cancelled) syncMissed();
+    }, 45000);
+
+    const appStateSub = AppState.addEventListener('change', (s) => {
+      if (s === 'active' && !cancelled) syncMissed();
+    });
+
+    return () => {
+      cancelled = true;
+      setConnected(false);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearInterval(fastPoll);
+      clearInterval(slowPoll);
+      appStateSub.remove();
+      try { if (channel) supabase.removeChannel(channel); } catch {}
+    };
+  }, [conversationId, user, syncMissed]);
+
+  // Mantém a âncora do sync incremental sempre no timestamp mais recente exibido.
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const newest = messages.reduce((acc, m) => (
+      String(m.created_at) > acc ? String(m.created_at) : acc
+    ), newestAtRef.current || '');
+    if (newest) newestAtRef.current = newest;
+  }, [messages]);
+
+  // Resolve URLs assinadas dos anexos (o bucket chat-attachments é privado).
+  useEffect(() => {
+    const missing = new Set<string>();
+    for (const m of messages) {
+      const atts = m.attachments;
+      if (Array.isArray(atts)) {
+        for (const a of atts) {
+          if (a?.path && !signedUrls[a.path]) missing.add(a.path);
         }
-      })
-      .subscribe();
-      
-    return () => { supabase.removeChannel(channel); };
-  }, [conversationId, user]);
+      }
+    }
+    if (missing.size === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const paths = [...missing];
+      const { data } = await supabase.storage
+        .from('chat-attachments')
+        .createSignedUrls(paths, SIGNED_URL_TTL);
+      if (cancelled || !data) return;
+      setSignedUrls(prev => {
+        const next = { ...prev };
+        for (const d of data) {
+          if (d.signedUrl && d.path) next[d.path] = d.signedUrl;
+        }
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [messages, signedUrls]);
 
   useEffect(() => {
     if (messages.length === 0) return;
+    const lastId = messages[messages.length - 1].id;
 
     if (!initialScrollDoneRef.current) {
       // Initial load: scroll to first unread or to the end
       initialScrollDoneRef.current = true;
+      lastMsgIdRef.current = lastId;
       const unreadIndex = firstUnreadIndexRef.current;
 
-      // Build the grouped list index: each separator adds 1 extra item.
-      // We need to map the raw message index to the grouped list index.
       let groupedUnreadIndex = -1;
       if (unreadIndex >= 0) {
-        // Count separators that appear before the unread message in the grouped list
         let sepCount = 0;
         let lastDay = '';
         for (let i = 0; i <= unreadIndex; i++) {
           const day = new Date(messages[i].created_at).toDateString();
           if (day !== lastDay) { sepCount++; lastDay = day; }
         }
-        // grouped index = raw message index + number of separators before it
         groupedUnreadIndex = unreadIndex + sepCount;
       }
 
       setTimeout(() => {
         if (groupedUnreadIndex >= 0) {
-          // Scroll so the first unread message is aligned to the top
-          flatListRef.current?.scrollToIndex({
-            index: groupedUnreadIndex,
-            animated: false,
-            viewPosition: 0, // 0 = top of viewport
-          });
+          flatListRef.current?.scrollToIndex({ index: groupedUnreadIndex, animated: false, viewPosition: 0 });
         } else {
-          // No unread messages: last message at the bottom
           flatListRef.current?.scrollToEnd({ animated: false });
         }
       }, 150);
-    } else {
-      // Subsequent updates (new messages arriving via realtime) → scroll to end
+      return;
+    }
+
+    // Só rola pro fim quando chega mensagem NOVA no fim — não ao carregar anteriores.
+    if (lastId !== lastMsgIdRef.current) {
+      lastMsgIdRef.current = lastId;
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     }
   }, [messages]);
+
+  /** Persiste (ou re-persiste, no retry) uma mensagem já presente na lista como otimista. */
+  const persistMessage = useCallback(async (msg: ChatMessage) => {
+    if (!user) return;
+    setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, status: 'sending' } : m)));
+
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        id: msg.id, // id gerado no cliente => retry é idempotente
+        conversation_id: msg.conversation_id,
+        sender_id: user.id,
+        content: msg.content,
+        message_type: msg.message_type || 'text',
+        attachments: msg.attachments || [],
+        is_read: false,
+        // created_at é responsabilidade do banco (trigger enforce_messages_created_at)
+      })
+      .select()
+      .single();
+
+    if (error && !isDuplicateKey(error)) {
+      setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, status: 'failed' } : m)));
+      return;
+    }
+
+    const saved = (data as ChatMessage) || {};
+    setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, ...saved, status: 'sent' } : m)));
+    // last_message_at da conversa é atualizado pelo trigger on_message_insert_update_conv.
+    // Notificação in-app é criada pelo trigger on_message_insert_notification.
+  }, [user]);
+
+  const retryMessage = useCallback((id: string) => {
+    const msg = messages.find(m => m.id === id);
+    if (msg) persistMessage(msg);
+  }, [messages, persistMessage]);
 
   async function handleSend() {
     if (!text.trim() || !user || !otherUserId) return;
     Vibration.vibrate(50);
     const content = text.trim();
     setSending(true);
+    setText('');
 
     let convId = conversationId;
     if (!convId) convId = await getOrCreateConversation();
-    if (!convId) { setSending(false); return; }
-
-    setText('');
-    const now = new Date().toISOString();
-    const { data, error } = await supabase
-      .from('messages')
-      .insert({ conversation_id: convId, sender_id: user.id, content, is_read: false })
-      .select()
-      .single();
-
-    await supabase.from('conversations').update({ last_message_at: now }).eq('id', convId);
-
-    if (!error && data) {
-      setMessages(prev => [...prev, data]);
-      const senderName = (user as any)?.company?.company_name || (user as any)?.profile?.name || 'Transportadora';
-      await supabase.from('notifications').insert({
-        user_id: otherUserId,
-        type: 'message',
-        title: `Nova mensagem de ${senderName}`,
-        message: content,
-        related_id: convId,
-        is_read: false,
-      });
+    if (!convId) {
+      setText(content); // devolve o texto pro input — não perdemos a mensagem
+      setSending(false);
+      return;
     }
+
+    const optimistic: ChatMessage = {
+      id: uuidv4(),
+      conversation_id: convId,
+      sender_id: user.id,
+      content,
+      created_at: new Date().toISOString(),
+      is_read: false,
+      status: 'sending',
+    };
+    setMessages(prev => [...prev, optimistic]);
     setSending(false);
+    await persistMessage(optimistic);
   }
 
   const processAttachment = async (uri: string, name: string, mimeType: string) => {
     setSending(true);
     try {
+      let convId = conversationId;
+      if (!convId) convId = await getOrCreateConversation();
+      if (!convId) { setSending(false); return; }
+
       const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
       const buffer = decode(base64);
 
-      const ext = (name.split('.').pop() || 'tmp').toLowerCase();
-      const filePath = `${Date.now()}_${user?.id?.slice(0, 8)}.${ext}`;
-      
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const ext = (name.split('.').pop() || 'bin').toLowerCase();
+      // Path exigido pelas policies do bucket privado: 1ª pasta = conversation_id.
+      const filePath = `${convId}/${uuidv4()}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
         .from('chat-attachments')
         .upload(filePath, buffer, {
           contentType: mimeType || 'application/octet-stream',
-          upsert: true,
+          upsert: false,
         });
 
       if (uploadError) {
@@ -341,58 +598,38 @@ export function ChatScreen() {
         return;
       }
 
-      const { data: publicUrlData } = supabase.storage.from('chat-attachments').getPublicUrl(filePath);
-      const fileUrl = publicUrlData.publicUrl;
+      const { data: signed } = await supabase.storage
+        .from('chat-attachments')
+        .createSignedUrl(filePath, SIGNED_URL_TTL);
 
-      // Determina o tipo de mensagem igual ao web
-      const isImage = mimeType.startsWith('image/');
+      const isImage = (mimeType || '').startsWith('image/');
       const messageType = isImage ? 'image' : 'file';
-
-      // Monta o attachment no mesmo formato que o web salva
       const attachment = {
         type: isImage ? 'image' : 'document',
-        url: fileUrl,          // URL pública direta
-        path: filePath,        // path no storage (compat com web)
+        path: filePath,               // fonte da verdade — URL assinada é resolvida na hora de exibir
+        url: signed?.signedUrl,       // conveniência (expira)
         filename: name,
-        name,                  // legado
-        size: undefined as number | undefined,
+        name,
       };
-
-      let convId = conversationId;
-      if (!convId) convId = await getOrCreateConversation();
-      if (!convId) return;
-
-      const now = new Date().toISOString();
-      const { data: msgData, error: msgError } = await supabase
-        .from('messages')
-        .insert({
-          conversation_id: convId,
-          sender_id: user?.id,
-          content: name,          // legenda ou nome do arquivo (igual ao web)
-          message_type: messageType,
-          attachments: [attachment],
-          is_read: false,
-        })
-        .select()
-        .single();
-
-      if (msgError) {
-        Alert.alert('Erro', `Não foi possível salvar a mensagem: ${msgError.message}`);
-      } else {
-        await supabase.from('conversations').update({ last_message_at: now }).eq('id', convId);
-        setMessages(prev => [...prev, msgData]);
-        setPendingAttachment(null);
-        const senderName = (user as any)?.company?.company_name || (user as any)?.profile?.name || 'Transportadora';
-        await supabase.from('notifications').insert({
-          user_id: otherUserId,
-          type: 'message',
-          title: `Nova mensagem de ${senderName}`,
-          message: name,
-          related_id: convId,
-          is_read: false,
-        });
+      if (signed?.signedUrl && attachment.path) {
+        setSignedUrls(prev => ({ ...prev, [attachment.path]: signed.signedUrl }));
       }
-    } catch(e: any) {
+
+      const optimistic: ChatMessage = {
+        id: uuidv4(),
+        conversation_id: convId,
+        sender_id: user!.id,
+        content: name,
+        created_at: new Date().toISOString(),
+        is_read: false,
+        message_type: messageType,
+        attachments: [attachment],
+        status: 'sending',
+      };
+      setMessages(prev => [...prev, optimistic]);
+      setPendingAttachment(null);
+      await persistMessage(optimistic);
+    } catch (e: any) {
       console.error(e);
       Alert.alert('Erro', e?.message || 'Ocorreu um erro ao anexar item.');
     } finally {
@@ -429,7 +666,8 @@ export function ChatScreen() {
           return;
         }
         const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images', 'videos'],
+          // O bucket chat-attachments só aceita imagens e PDF (migration 0017).
+          mediaTypes: ['images'],
           quality: 0.8,
         });
         if (result.canceled || !result.assets || result.assets.length === 0) return;
@@ -491,7 +729,7 @@ export function ChatScreen() {
     return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
   }
 
-  const groupedMessages: (Message | { type: 'separator'; label: string; key: string })[] = [];
+  const groupedMessages: (ChatMessage | { type: 'separator'; label: string; key: string })[] = [];
   let lastDay = '';
   messages.forEach(msg => {
     const day = new Date(msg.created_at).toDateString();
@@ -545,6 +783,13 @@ export function ChatScreen() {
         </TouchableOpacity>
       </View>
 
+      {!realtimeConnected && !loading && (
+        <View style={styles.connBanner}>
+          <ActivityIndicator size="small" color={COLORS.textSecondary} />
+          <Text style={styles.connBannerText}>Reconectando… as mensagens continuam sendo sincronizadas</Text>
+        </View>
+      )}
+
       {loading ? (
         <ActivityIndicator size="large" color={COLORS.primary} style={{ flex: 1 }} />
       ) : (
@@ -553,10 +798,24 @@ export function ChatScreen() {
           data={groupedMessages}
           keyExtractor={(item, i) => ('key' in item ? item.key : item.id) || String(i)}
           contentContainerStyle={styles.messages}
+          maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
           onScrollToIndexFailed={() => {
-            // Fallback: if item layout is unknown, just scroll to end
             setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 200);
           }}
+          ListHeaderComponent={
+            hasMore ? (
+              <TouchableOpacity
+                style={styles.loadOlderBtn}
+                onPress={loadOlder}
+                disabled={loadingOlder}
+                activeOpacity={0.7}
+              >
+                {loadingOlder
+                  ? <ActivityIndicator size="small" color={COLORS.primary} />
+                  : <Text style={styles.loadOlderText}>Carregar mensagens anteriores</Text>}
+              </TouchableOpacity>
+            ) : null
+          }
           renderItem={({ item }) => {
             if ('type' in item) {
               return (
@@ -568,13 +827,11 @@ export function ChatScreen() {
               );
             }
             const isMine = item.sender_id === user?.id;
-            
-            // Suporte ao novo formato (message_type + attachments) igual ao web
-            // E fallback para o formato legado [FILE]
-            const msgType = (item as any).message_type;
-            const attachments = (item as any).attachments as Array<{ type: string; url?: string; path?: string; filename?: string; name?: string }> | undefined;
+
+            const msgType = item.message_type;
+            const attachments = item.attachments;
             const hasAttachment = (msgType === 'image' || msgType === 'file') && attachments && attachments.length > 0;
-            
+
             // Fallback legado [FILE]
             const isLegacyFile = !hasAttachment && item.content.startsWith('[FILE]');
             let legacyFileUrl = '';
@@ -587,20 +844,23 @@ export function ChatScreen() {
               legacyFileType = parts[2]?.trim() || 'unknown';
             }
 
-            // Dados do attachment (novo formato tem prioridade)
             const att = hasAttachment ? attachments![0] : null;
-            const attUrl = att?.url || legacyFileUrl;
+            const attUrl = (att?.path && signedUrls[att.path]) || att?.url || legacyFileUrl;
             const attName = att?.filename || att?.name || legacyFileName;
             const attIsImage = hasAttachment ? msgType === 'image' : legacyFileType.startsWith('image/');
             const isFile = hasAttachment || isLegacyFile;
+            const failed = item.status === 'failed';
+            const pending = item.status === 'sending';
 
             return (
               <View style={[styles.msgWrap, isMine ? styles.msgWrapRight : styles.msgWrapLeft]}>
-                <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleOther, attIsImage && isFile && { paddingHorizontal: 4, paddingVertical: 4 }]}>
+                <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleOther, attIsImage && isFile && { paddingHorizontal: 4, paddingVertical: 4 }, failed && styles.bubbleFailed]}>
                   {isFile ? (
-                    <TouchableOpacity activeOpacity={0.8} onPress={() => Linking.openURL(attUrl)}>
+                    <TouchableOpacity activeOpacity={0.8} onPress={() => attUrl && Linking.openURL(attUrl)}>
                       {attIsImage ? (
-                         <Image source={{ uri: attUrl }} style={styles.chatImage} resizeMode="cover" />
+                         attUrl
+                           ? <Image source={{ uri: attUrl }} style={styles.chatImage} resizeMode="cover" />
+                           : <View style={[styles.chatImage, styles.chatImageLoading]}><ActivityIndicator size="small" color={COLORS.primary} /></View>
                       ) : (
                          <View style={styles.fileRow}>
                             <Ionicons name="document-text" size={32} color={isMine ? '#fff' : COLORS.primary} />
@@ -619,14 +879,20 @@ export function ChatScreen() {
                     <Text style={[styles.bubbleTime, isMine && styles.bubbleTimeMine, attIsImage && isFile && { color: '#fff' }]}>
                       {formatTime(item.created_at)}
                     </Text>
-                    {isMine && (
+                    {isMine && !failed && (
                       <Ionicons
-                        name={item.is_read ? 'checkmark-done' : 'checkmark'}
+                        name={pending ? 'time-outline' : (item.is_read ? 'checkmark-done' : 'checkmark')}
                         size={12}
                         color={item.is_read ? (attIsImage && isFile ? '#4ade80' : '#fff') : 'rgba(255,255,255,0.6)'}
                       />
                     )}
                   </View>
+                  {failed && (
+                    <TouchableOpacity style={styles.retryRow} onPress={() => retryMessage(item.id)} activeOpacity={0.7}>
+                      <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                      <Text style={styles.retryText}>Falha ao enviar — tocar para tentar de novo</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
             );
@@ -653,8 +919,8 @@ export function ChatScreen() {
               <Text style={styles.actionSheetTitle} numberOfLines={1}>{userName}</Text>
             </View>
 
-            <TouchableOpacity 
-              style={styles.actionOption} 
+            <TouchableOpacity
+              style={styles.actionOption}
               onPress={() => {
                 setShowOptionsModal(false);
                 setTimeout(() => setShowProfileModal(true), 100);
@@ -664,8 +930,8 @@ export function ChatScreen() {
               <Text style={styles.actionOptionText}>Ver perfil</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity 
-              style={styles.actionOption} 
+            <TouchableOpacity
+              style={styles.actionOption}
               onPress={handlePinConversation}
             >
               <Ionicons name={isPinned ? "pin" : "pin-outline"} size={22} color={COLORS.text} />
@@ -674,8 +940,8 @@ export function ChatScreen() {
               </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity 
-              style={styles.actionOption} 
+            <TouchableOpacity
+              style={styles.actionOption}
               onPress={handleDeleteConversation}
             >
               <Ionicons name="trash-outline" size={22} color={COLORS.danger} />
@@ -797,6 +1063,27 @@ const styles = StyleSheet.create({
   headerRouteText: { fontSize: 10, color: COLORS.primary, fontWeight: '600', flexShrink: 1 },
   headerName: { fontSize: 15, fontWeight: '700', color: COLORS.text },
   headerSub: { fontSize: 12, color: COLORS.textSecondary },
+  connBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: COLORS.borderLight,
+  },
+  connBannerText: { fontSize: 11, color: COLORS.textSecondary },
+  loadOlderBtn: {
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 8,
+  },
+  loadOlderText: { fontSize: 12, color: COLORS.primary, fontWeight: '600' },
   messages: { padding: 12, paddingBottom: 8, gap: 4 },
   daySeparator: {
     flexDirection: 'row',
@@ -806,10 +1093,10 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   dayLine: { flex: 1, height: 1, backgroundColor: COLORS.borderLight },
-  dayLabel: { 
-    fontSize: 11, 
-    color: COLORS.textLight, 
-    fontWeight: '700', 
+  dayLabel: {
+    fontSize: 11,
+    color: COLORS.textLight,
+    fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
@@ -838,11 +1125,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
+  bubbleFailed: { borderWidth: 1, borderColor: COLORS.danger },
   bubbleText: { fontSize: 15, color: COLORS.text, lineHeight: 21 },
   bubbleTextMine: { color: '#fff' },
   bubbleFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 2 },
   bubbleTime: { fontSize: 10, color: COLORS.textSecondary },
   bubbleTimeMine: { color: 'rgba(255,255,255,0.7)' },
+  retryRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  retryText: { fontSize: 10, color: COLORS.danger, fontWeight: '600', flexShrink: 1 },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -899,6 +1189,7 @@ const styles = StyleSheet.create({
     height: 280,
     borderRadius: 12,
   },
+  chatImageLoading: { alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.borderLight },
   fileRow: {
     flexDirection: 'row',
     alignItems: 'center',

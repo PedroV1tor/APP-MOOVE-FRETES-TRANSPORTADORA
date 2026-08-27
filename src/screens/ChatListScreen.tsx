@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  RefreshControl, ActivityIndicator, Alert, ScrollView, Modal,
+  RefreshControl, ActivityIndicator, Alert, ScrollView, Modal, AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -211,26 +211,57 @@ export function ChatListScreen() {
   useEffect(() => {
     if (!user) return;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+    let backoff = 1000;
+
     const debouncedLoad = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => load(), 800);
     };
-    const channel = supabase
-      .channel(`chat-list-${Date.now()}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-        // Only reload if the message involves a conversation we might be in
-        const msg = payload.new as any;
-        if (msg.sender_id !== user.id || msg.sender_id === user.id) {
+
+    const connect = () => {
+      if (cancelled) return;
+      channel = supabase
+        .channel(`chat-list-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
           debouncedLoad();
-        }
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: 'is_read=eq.true' }, () => {
-        debouncedLoad();
-      })
-      .subscribe();
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: 'is_read=eq.true' }, () => {
+          debouncedLoad();
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            backoff = 1000;
+            debouncedLoad(); // pega o que mudou enquanto (re)conectava
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            if (!cancelled && !reconnectTimer) {
+              reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                try { if (channel) supabase.removeChannel(channel); } catch {}
+                connect();
+              }, backoff);
+              backoff = Math.min(backoff * 2, 30000);
+            }
+          }
+        });
+    };
+    connect();
+
+    // Fallback: a lista se atualiza sozinha a cada 30s mesmo sem Realtime.
+    const poll = setInterval(() => { if (!cancelled) load(); }, 30000);
+    const appStateSub = AppState.addEventListener('change', (s) => {
+      if (s === 'active' && !cancelled) load();
+    });
+
     return () => {
+      cancelled = true;
       if (debounceTimer) clearTimeout(debounceTimer);
-      supabase.removeChannel(channel);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearInterval(poll);
+      appStateSub.remove();
+      try { if (channel) supabase.removeChannel(channel); } catch {}
     };
   }, [user, load]);
 
