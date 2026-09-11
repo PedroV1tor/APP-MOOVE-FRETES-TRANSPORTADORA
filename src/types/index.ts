@@ -31,10 +31,17 @@ export interface Driver {
   name: string;
   phone: string;
   cpf?: string;
+  rg?: string;
+  birth_date?: string;
   cnh?: string;
   cnh_category?: string;
   cnh_expiry?: string;
   rntrc?: string;
+  rntrc_expiry?: string;
+  address?: {
+    cep?: string; street?: string; number?: string; complement?: string;
+    neighborhood?: string; city?: string; state?: string;
+  };
   profile_image?: string;
   rating: number;
   completed_trips: number;
@@ -182,7 +189,7 @@ export interface Company {
   cnpj?: string;
   phone?: string;
   email?: string;
-  logo?: string;
+  logo_url?: string;
   address?: { city?: string; state?: string; [key: string]: any };
   verified: boolean;
   created_at: string;

@@ -85,7 +85,12 @@ export function NotificationsScreen() {
     if (notif.related_id) {
       switch (notif.type) {
         case 'message':
-          navigation.navigate('Chat', { conversationId: notif.related_id, userId: '', userName: '' });
+          // "Chat" mora dentro de Main -> ChatTab; daqui (tela no stack raiz)
+          // precisa do caminho completo, senão o navigator não acha a rota.
+          navigation.navigate('Main', {
+            screen: 'ChatTab',
+            params: { screen: 'Chat', params: { conversationId: notif.related_id, userId: '', userName: '' } },
+          });
           break;
         case 'freight':
           navigation.navigate('FreightDetail', { freight: { id: notif.related_id } });

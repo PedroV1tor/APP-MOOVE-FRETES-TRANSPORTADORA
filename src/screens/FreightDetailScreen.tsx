@@ -64,16 +64,27 @@ export function FreightDetailScreen() {
 
   function handleChat() {
     Vibration.vibrate(40);
-    navigation.navigate('Chat', {
-      userId: freight.company_id,
-      userName: freight.company_name || 'Embarcador',
-      source: 'freight',
-      sourceId: freight.id,
-      originCity: freight.origin?.city,
-      originState: freight.origin?.state,
-      destinationCity: freight.destination?.city,
-      destinationState: freight.destination?.state,
-      initialMessage: `Olá, tenho interesse no frete ${freightCode}.\n\n📦 ${formatLocation(freight.origin)} → ${formatLocation(freight.destination)}\nProduto: ${freight.product || freight.cargo_type || 'Não especificado'}\n\nA carga ainda está disponível? 🚚`,
+    // "Chat" mora dentro de ChatTab (uma aba diferente da que essa tela pode
+    // estar aberta agora — Fretes, ou nem estar dentro das abas quando aberta
+    // via FreightDetail no stack raiz). navigate('Chat', ...) simples só
+    // funciona quando o chamador já está dentro do próprio ChatStack; daqui
+    // precisa apontar explicitamente pra Main -> ChatTab -> Chat.
+    navigation.navigate('Main', {
+      screen: 'ChatTab',
+      params: {
+        screen: 'Chat',
+        params: {
+          userId: freight.company_id,
+          userName: freight.company_name || 'Embarcador',
+          source: 'freight',
+          sourceId: freight.id,
+          originCity: freight.origin?.city,
+          originState: freight.origin?.state,
+          destinationCity: freight.destination?.city,
+          destinationState: freight.destination?.state,
+          initialMessage: `Olá, tenho interesse no frete ${freightCode}.\n\n📦 ${formatLocation(freight.origin)} → ${formatLocation(freight.destination)}\nProduto: ${freight.product || freight.cargo_type || 'Não especificado'}\n\nA carga ainda está disponível? 🚚`,
+        },
+      },
     });
   }
 

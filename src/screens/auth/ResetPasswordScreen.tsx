@@ -4,11 +4,22 @@ import {
   KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { COLORS } from '../../utils/constants';
 import { useToast } from '../../contexts/ToastContext';
+import { useAuth } from '../../contexts/AuthContext';
 
-export function ResetPasswordScreen({ navigation }: any) {
+export function ResetPasswordScreen({ navigation, route }: any) {
+  const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  // Duas entradas pra essa mesma tela: link de "esqueci minha senha" (sem
+  // sessão de app ainda — manda pro Login como sempre, e não faz sentido
+  // pedir senha atual porque é exatamente pra quem não lembra dela) e
+  // "Alterar Senha" dentro de Configurações, com o usuário já logado (aí sim
+  // confirma a senha atual antes, e só volta de onde veio).
+  const fromSettings = route?.params?.fromSettings === true;
+  const [currentPassword, setCurrentPassword] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -16,6 +27,10 @@ export function ResetPasswordScreen({ navigation }: any) {
   const { showToast } = useToast();
 
   async function handleReset() {
+    if (fromSettings && !currentPassword) {
+      Alert.alert('Erro', 'Informe sua senha atual.');
+      return;
+    }
     if (!password) {
       Alert.alert('Erro', 'Informe a nova senha.');
       return;
@@ -31,11 +46,29 @@ export function ResetPasswordScreen({ navigation }: any) {
 
     setLoading(true);
     try {
+      if (fromSettings) {
+        // supabase-js não tem "trocar senha com a senha atual" direto —
+        // confirma a atual reautenticando antes de trocar.
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: user?.email || '',
+          password: currentPassword,
+        });
+        if (signInError) {
+          Alert.alert('Erro', 'Senha atual incorreta.');
+          setLoading(false);
+          return;
+        }
+      }
+
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
 
-      showToast('Senha redefinida com sucesso!');
-      navigation.replace('Login');
+      showToast('Senha alterada com sucesso!');
+      if (fromSettings) {
+        navigation.goBack();
+      } else {
+        navigation.replace('Login');
+      }
     } catch (err: any) {
       showToast(err.message || 'Falha ao redefinir senha.', 'error');
     } finally {
@@ -46,7 +79,7 @@ export function ResetPasswordScreen({ navigation }: any) {
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <View style={styles.header}>
+        <View style={[styles.header, { marginTop: insets.top + 16 }]}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
@@ -57,6 +90,22 @@ export function ResetPasswordScreen({ navigation }: any) {
           <Text style={styles.description}>
             Crie uma nova senha segura para acessar sua conta.
           </Text>
+
+          {fromSettings && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Senha Atual</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="lock-closed-outline" size={18} color={COLORS.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Digite sua senha atual"
+                  value={currentPassword}
+                  onChangeText={setCurrentPassword}
+                  secureTextEntry={!showPassword}
+                />
+              </View>
+            </View>
+          )}
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Nova Senha</Text>
@@ -105,7 +154,7 @@ export function ResetPasswordScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#fff' },
   container: { padding: 24 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 40, marginBottom: 32 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 32 },
   backBtn: { padding: 4 },
   title: { fontSize: 22, fontWeight: '800', color: COLORS.text },
   form: { gap: 20 },

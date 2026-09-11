@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { COLORS } from '../../utils/constants';
@@ -14,6 +15,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function LoginScreen() {
   const { signIn } = useAuth();
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [userType, setUserType] = useState<'caminhoneiro' | 'transportadora'>('transportadora');
@@ -74,7 +76,7 @@ export function LoginScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={[styles.container, { paddingTop: insets.top + 16 }]} keyboardShouldPersistTaps="handled">
 
         <View style={styles.mainArea}>
           <Image source={require('../../../assets/logo.png')} style={styles.logoImage} resizeMode="contain" />
@@ -90,7 +92,7 @@ export function LoginScreen() {
                 style={[styles.userTypeBtn, userType === 'caminhoneiro' && styles.userTypeBtnActive]}
                 onPress={() => setUserType('caminhoneiro')}
               >
-                <Ionicons name="truck-outline" size={20} color={userType === 'caminhoneiro' ? '#fff' : COLORS.textSecondary} />
+                <Ionicons name="car-outline" size={20} color={userType === 'caminhoneiro' ? '#fff' : COLORS.textSecondary} />
                 <Text style={[styles.userTypeBtnText, userType === 'caminhoneiro' && styles.userTypeBtnTextActive]}>Motorista</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -175,7 +177,7 @@ export function LoginScreen() {
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.signUpLink} onPress={() => navigation.navigate('SignUp')}>
+          <TouchableOpacity style={styles.signUpLink} onPress={() => navigation.navigate('UserTypeSelection')}>
             <Text style={styles.signUpLinkText}>Não tem conta? <Text style={{ fontWeight: '700', color: COLORS.primary }}>Criar Conta</Text></Text>
           </TouchableOpacity>
           </View>

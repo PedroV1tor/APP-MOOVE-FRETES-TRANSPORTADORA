@@ -1,13 +1,14 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { registerForPushNotifications } from '../services/notifications';
-import type { Company, Profile } from '../types';
+import type { Company, Profile, Driver } from '../types';
 
 interface AuthUser {
   id: string;
   email: string;
   profile: Profile | null;
   company: Company | null;
+  driver: Driver | null;
 }
 
 interface AuthContextType {
@@ -48,19 +49,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function loadUserData(userId: string, email: string) {
     try {
-      const [profileResult, companyResult] = await Promise.all([
+      const [profileResult, companyResult, driverResult] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', userId).single(),
         supabase.from('companies').select('*').eq('user_id', userId).limit(1).maybeSingle(),
+        supabase.from('drivers').select('*').eq('user_id', userId).limit(1).maybeSingle(),
       ]);
 
       if (profileResult.error) console.warn('[AuthContext] Profile load error:', profileResult.error.message);
       if (companyResult.error) console.warn('[AuthContext] Company load error:', companyResult.error.message);
+      if (driverResult.error) console.warn('[AuthContext] Driver load error:', driverResult.error.message);
 
       setUser({
         id: userId,
         email,
         profile: profileResult.data || null,
         company: companyResult.data || null,
+        driver: driverResult.data || null,
       });
 
       registerForPushNotifications(userId).catch(e =>
@@ -85,14 +89,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function refreshCompany() {
     if (!user) return;
-    const [companyRes, profileRes] = await Promise.all([
+    const [companyRes, profileRes, driverRes] = await Promise.all([
       supabase.from('companies').select('*').eq('user_id', user.id).limit(1).maybeSingle(),
       supabase.from('profiles').select('*').eq('id', user.id).single(),
+      supabase.from('drivers').select('*').eq('user_id', user.id).limit(1).maybeSingle(),
     ]);
     setUser(prev => prev ? {
       ...prev,
       company: companyRes.data || prev.company,
       profile: profileRes.data || prev.profile,
+      driver: driverRes.data || prev.driver,
     } : prev);
   }
 

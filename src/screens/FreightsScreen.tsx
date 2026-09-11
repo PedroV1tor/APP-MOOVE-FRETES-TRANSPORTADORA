@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   RefreshControl, ActivityIndicator, Modal, ScrollView,
-  KeyboardAvoidingView, Platform, Alert, Linking,
+  KeyboardAvoidingView, Platform, Alert, Linking, TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +24,7 @@ const CLOSED_TRAILERS = ['Sider', 'Baú', 'Baú Frigorífico', 'Baú Refrigerado
 const SPECIAL_TRAILERS = ['Silo', 'Cegonheiro', 'Gaiola', 'Tanque', 'Munck'];
 
 interface FilterState {
+  freightCode: string;
   originCity: string;
   destinationCity: string;
   vehicleTypes: string[];
@@ -34,6 +35,7 @@ interface FilterState {
 }
 
 const DEFAULT_FILTERS: FilterState = {
+  freightCode: '',
   originCity: '',
   destinationCity: '',
   vehicleTypes: [],
@@ -47,6 +49,7 @@ type StatusFilter = 'all' | 'active' | 'scheduled' | 'inactive';
 
 function countActiveFilters(f: FilterState): number {
   let n = 0;
+  if (f.freightCode.trim()) n++;
   if (f.originCity.trim()) n++;
   if (f.destinationCity.trim()) n++;
   if (f.vehicleTypes.length > 0) n++;
@@ -61,6 +64,25 @@ function toggleItem(list: string[], item: string): string[] {
   return list.includes(item) ? list.filter(v => v !== item) : [...list, item];
 }
 
+// Mesmo código mostrado no chat/WhatsApp e no detalhe do frete
+// (FreightDetailScreen.tsx) — repetido aqui pra poder filtrar por ele antes
+// de abrir o frete. Se o frete já tem freight_code salvo (gerado pelo banco
+// na criação, migration 0020), usa ele; senão cai no mesmo pseudo-código
+// derivado do id que a tela de detalhe mostraria.
+function getFreightCode(freight: Freight): string {
+  if (freight.freight_code) return freight.freight_code;
+  const chars = freight.id.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+  const letters = chars.replace(/[0-9]/g, '');
+  const numbers = chars.replace(/[A-Z]/g, '');
+  return `${letters[0] || 'A'}${letters[1] || 'B'}${letters[2] || 'C'}${numbers[0] || '1'}${letters[3] || 'D'}${numbers[1] || '2'}${numbers[2] || '3'}`;
+}
+
+// Busca por código tolerante: ignora maiúscula/minúscula, "#", "-", espaço
+// etc. — "260008", "mf 26 0008" e "MF-26-0008" devem achar o mesmo frete.
+function normalizeCode(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
 function buildShareMessage(freight: Freight): string {
   const origin = formatLocation(freight.origin);
   const dest = formatLocation(freight.destination);
@@ -73,6 +95,9 @@ export function FreightsScreen() {
   const navigation = useNavigation<any>();
   const { user } = useAuth();
   const route = useRoute<any>();
+  // Motorista nunca publica frete — só navega a aba "Todos os Fretes" (que
+  // já é a busca/contato que ele usa no painel web).
+  const isDriver = user?.profile?.user_type === 'caminhoneiro';
 
   // Shared states
   const [activeTab, setActiveTab] = useState<'mine' | 'all'>('all');
@@ -121,6 +146,9 @@ export function FreightsScreen() {
 
   // ── All-tab data (filtered) ─────────────────────────────────────
   const filteredAll = useMemo(() => allItems.filter((f: Freight) => {
+    if (filters.freightCode.trim()) {
+      if (!normalizeCode(getFreightCode(f)).includes(normalizeCode(filters.freightCode))) return false;
+    }
     if (filters.originCity.trim() && !f.origin?.city?.toLowerCase().includes(filters.originCity.toLowerCase())) return false;
     if (filters.destinationCity.trim() && !f.destination?.city?.toLowerCase().includes(filters.destinationCity.toLowerCase())) return false;
     if (filters.vehicleTypes.length > 0) {
@@ -252,7 +280,7 @@ export function FreightsScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View>
           <Text style={styles.title}>Fretes</Text>
-          <Text style={styles.subtitle}>Gerencie e encontre fretes</Text>
+          <Text style={styles.subtitle}>{isDriver ? 'Encontre fretes disponíveis' : 'Gerencie e encontre fretes'}</Text>
         </View>
         {activeTab === 'all' && (
           <TouchableOpacity style={styles.filterBtn} onPress={openFilter}>
@@ -266,21 +294,23 @@ export function FreightsScreen() {
         )}
       </View>
 
-      {/* Tab bar */}
-      <View style={styles.tabBar}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'all' && styles.tabActive]}
-          onPress={() => setActiveTab('all')}
-        >
-          <Text style={[styles.tabText, activeTab === 'all' && styles.tabTextActive]}>Todos os Fretes</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'mine' && styles.tabActive]}
-          onPress={() => setActiveTab('mine')}
-        >
-          <Text style={[styles.tabText, activeTab === 'mine' && styles.tabTextActive]}>Meus Fretes</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Tab bar — motorista não tem "Meus Fretes" (nunca publica), então nem mostra o seletor */}
+      {!isDriver && (
+        <View style={styles.tabBar}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'all' && styles.tabActive]}
+            onPress={() => setActiveTab('all')}
+          >
+            <Text style={[styles.tabText, activeTab === 'all' && styles.tabTextActive]}>Todos os Fretes</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'mine' && styles.tabActive]}
+            onPress={() => setActiveTab('mine')}
+          >
+            <Text style={[styles.tabText, activeTab === 'mine' && styles.tabTextActive]}>Meus Fretes</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* ── ALL FREIGHTS TAB ── */}
       {activeTab === 'all' && (
@@ -421,14 +451,16 @@ export function FreightsScreen() {
         </View>
       )}
 
-      {/* FAB — visível em ambas as abas */}
-      <TouchableOpacity
-        style={[styles.fab, { bottom: Math.max(insets.bottom, 16) }]}
-        onPress={() => navigation.navigate('CreateFreight')}
-        activeOpacity={0.85}
-      >
-        <Ionicons name="add" size={28} color="#fff" />
-      </TouchableOpacity>
+      {/* FAB — visível em ambas as abas, exceto pra motorista (não publica frete) */}
+      {!isDriver && (
+        <TouchableOpacity
+          style={[styles.fab, { bottom: Math.max(insets.bottom, 16) }]}
+          onPress={() => navigation.navigate('CreateFreight')}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="add" size={28} color="#fff" />
+        </TouchableOpacity>
+      )}
 
       {/* ── ACTION SHEET MODAL ── */}
       <Modal visible={!!actionsFreight} animationType="slide" transparent onRequestClose={closeAction}>
@@ -505,6 +537,17 @@ export function FreightsScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
+              <FilterSection title="Código do Frete">
+                <TextInput
+                  style={styles.codeInput}
+                  placeholder="Ex: 260008 ou MF-26-0008"
+                  placeholderTextColor={COLORS.textLight}
+                  value={pending.freightCode}
+                  onChangeText={(v) => setPending(p => ({ ...p, freightCode: v }))}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                />
+              </FilterSection>
               <FilterSection title="Origem">
                 <CityAutocompleteInput placeholder="Cidade de origem" value={pending.originCity} onSelect={(city) => setPending(p => ({ ...p, originCity: city }))} />
               </FilterSection>
@@ -721,6 +764,7 @@ function AppliedFiltersBar({ filters, onRemove, onClearAll }: {
 }) {
   const active = useMemo(() => {
     const items: { key: keyof FilterState; label: string; val?: string }[] = [];
+    if (filters.freightCode.trim()) items.push({ key: 'freightCode', label: `Código: ${filters.freightCode}` });
     if (filters.originCity.trim()) items.push({ key: 'originCity', label: `Origem: ${filters.originCity}` });
     if (filters.destinationCity.trim()) items.push({ key: 'destinationCity', label: `Destino: ${filters.destinationCity}` });
     filters.vehicleTypes.forEach(v => items.push({ key: 'vehicleTypes', val: v, label: v }));
@@ -861,6 +905,10 @@ const styles = StyleSheet.create({
   section: { paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border, gap: 10 },
   sectionTitle: { fontSize: 15, fontWeight: '700', color: COLORS.text },
   groupLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary, marginTop: 2 },
+  codeInput: {
+    backgroundColor: COLORS.background, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border,
+    paddingHorizontal: 12, height: 44, fontSize: 14, color: COLORS.text,
+  },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     paddingHorizontal: 12, paddingVertical: 6,

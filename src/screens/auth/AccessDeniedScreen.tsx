@@ -12,7 +12,7 @@ export function AccessDeniedScreen() {
       <Ionicons name="lock-closed" size={64} color={COLORS.primary} />
       <Text style={styles.title}>Acesso não permitido</Text>
       <Text style={styles.message}>
-        Este aplicativo é exclusivo para empresas transportadoras e seus colaboradores.
+        Este aplicativo é exclusivo para transportadoras, motoristas e seus colaboradores.
         {'\n\n'}
         Sua conta não tem permissão para acessar esta plataforma.
       </Text>

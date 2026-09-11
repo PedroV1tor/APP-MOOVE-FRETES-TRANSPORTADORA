@@ -9,8 +9,55 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { COLORS } from '../utils/constants';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 const SETTINGS_KEY = '@moovefretes_settings';
+
+/**
+ * Carrega/grava public.user_preferences — a mesma tabela que o painel web
+ * usa (SystemSettings.tsx). notification_settings e privacy_settings são
+ * jsonb compartilhados entre os dois apps: cada um grava só as chaves que
+ * conhece, então savePreference sempre precisa mandar o jsonb MESCLADO
+ * (nunca só a chave que mudou), senão um app apaga o que o outro salvou ali.
+ */
+function useUserPreferences() {
+  const { user } = useAuth();
+  const [prefs, setPrefs] = useState<any | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!user?.id) return;
+      try {
+        const { data, error } = await supabase
+          .from('user_preferences')
+          .select('*')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (!error && data && !cancelled) setPrefs(data);
+      } catch {
+        // offline ou erro de rede — fica só com o cache local (AsyncStorage)
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  const savePreference = useCallback(async (patch: Record<string, any>) => {
+    if (!user?.id) return;
+    try {
+      await supabase.from('user_preferences').upsert(
+        { user_id: user.id, ...patch, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' }
+      );
+    } catch {
+      // best-effort — o valor já ficou salvo localmente via usePersistentSetting
+    }
+  }, [user?.id]);
+
+  return { prefs, savePreference };
+}
 
 type SettingsPage = 'notifications' | 'privacy' | 'help' | 'about';
 
@@ -72,12 +119,42 @@ function usePersistentSetting(key: string, defaultValue: boolean): [boolean, (v:
 }
 
 function NotificationsPage() {
+  const { prefs, savePreference } = useUserPreferences();
   const [pushEnabled, setPushEnabledRaw] = usePersistentSetting('pushEnabled', true);
   const [freightAlerts, setFreightAlerts] = usePersistentSetting('freightAlerts', true);
   const [messageAlerts, setMessageAlerts] = usePersistentSetting('messageAlerts', true);
   const [ratingAlerts, setRatingAlerts] = usePersistentSetting('ratingAlerts', true);
   const [soundEnabled, setSoundEnabled] = usePersistentSetting('soundEnabled', true);
   const [vibrationEnabled, setVibrationEnabled] = usePersistentSetting('vibrationEnabled', true);
+
+  // O servidor manda quando existir (reflete o que foi salvo no painel web
+  // ou noutro aparelho) — sobrescreve o cache local só quando chega.
+  useEffect(() => {
+    if (!prefs) return;
+    if (prefs.push_notifications !== undefined) setPushEnabledRaw(prefs.push_notifications);
+    if (prefs.freight_alerts !== undefined) setFreightAlerts(prefs.freight_alerts);
+    if (prefs.chat_notifications !== undefined) setMessageAlerts(prefs.chat_notifications);
+    const ns = prefs.notification_settings || {};
+    if (ns.rating_alerts !== undefined) setRatingAlerts(ns.rating_alerts);
+    if (ns.sound_enabled !== undefined) setSoundEnabled(ns.sound_enabled);
+    if (ns.vibration_enabled !== undefined) setVibrationEnabled(ns.vibration_enabled);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefs]);
+
+  // notification_settings é jsonb compartilhado com o web (que só conhece
+  // sound_enabled) — sempre manda as 3 chaves do mobile juntas, senão o
+  // painel web sobrescreveria isso na próxima vez que salvasse notificações.
+  function saveNotificationSettings(patch: Record<string, boolean>) {
+    savePreference({
+      notification_settings: {
+        ...(prefs?.notification_settings || {}),
+        rating_alerts: ratingAlerts,
+        sound_enabled: soundEnabled,
+        vibration_enabled: vibrationEnabled,
+        ...patch,
+      },
+    });
+  }
 
   async function handlePushToggle(value: boolean) {
     if (value) {
@@ -108,6 +185,32 @@ function NotificationsPage() {
         : { handleNotification: async () => ({ shouldShowAlert: false, shouldPlaySound: false, shouldSetBadge: false, shouldShowBanner: false, shouldShowList: false }) }
     );
     setPushEnabledRaw(value);
+    savePreference({ push_notifications: value });
+  }
+
+  function handleFreightAlertsChange(value: boolean) {
+    setFreightAlerts(value);
+    savePreference({ freight_alerts: value });
+  }
+
+  function handleMessageAlertsChange(value: boolean) {
+    setMessageAlerts(value);
+    savePreference({ chat_notifications: value });
+  }
+
+  function handleRatingAlertsChange(value: boolean) {
+    setRatingAlerts(value);
+    saveNotificationSettings({ rating_alerts: value });
+  }
+
+  function handleSoundChange(value: boolean) {
+    setSoundEnabled(value);
+    saveNotificationSettings({ sound_enabled: value });
+  }
+
+  function handleVibrationChange(value: boolean) {
+    setVibrationEnabled(value);
+    saveNotificationSettings({ vibration_enabled: value });
   }
 
   return (
@@ -119,32 +222,72 @@ function NotificationsPage() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Tipos de Alerta</Text>
-        <ToggleRow label="Novos fretes disponíveis" value={freightAlerts} onChange={setFreightAlerts} />
-        <ToggleRow label="Mensagens recebidas" value={messageAlerts} onChange={setMessageAlerts} />
-        <ToggleRow label="Avaliações recebidas" value={ratingAlerts} onChange={setRatingAlerts} />
+        <ToggleRow label="Novos fretes disponíveis" value={freightAlerts} onChange={handleFreightAlertsChange} />
+        <ToggleRow label="Mensagens recebidas" value={messageAlerts} onChange={handleMessageAlertsChange} />
+        <ToggleRow label="Avaliações recebidas" value={ratingAlerts} onChange={handleRatingAlertsChange} />
       </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Preferências</Text>
-        <ToggleRow label="Som de notificação" value={soundEnabled} onChange={setSoundEnabled} />
-        <ToggleRow label="Vibração" value={vibrationEnabled} onChange={setVibrationEnabled} />
+        <ToggleRow label="Som de notificação" value={soundEnabled} onChange={handleSoundChange} />
+        <ToggleRow label="Vibração" value={vibrationEnabled} onChange={handleVibrationChange} />
       </View>
     </View>
   );
 }
 
 function PrivacyPage() {
+  const { prefs, savePreference } = useUserPreferences();
   const [shareLocation, setShareLocation] = usePersistentSetting('shareLocation', false);
   const [showPhone, setShowPhone] = usePersistentSetting('showPhone', true);
   const [showEmail, setShowEmail] = usePersistentSetting('showEmail', true);
+
+  // privacy_settings é jsonb compartilhado com o web (que grava
+  // share_location/share_activity/profile_visibility) — sincroniza o que o
+  // servidor já tiver e sempre manda as 3 chaves do mobile juntas ao salvar.
+  useEffect(() => {
+    if (!prefs) return;
+    const ps = prefs.privacy_settings || {};
+    if (ps.share_location !== undefined) setShareLocation(ps.share_location);
+    if (ps.show_phone !== undefined) setShowPhone(ps.show_phone);
+    if (ps.show_email !== undefined) setShowEmail(ps.show_email);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefs]);
+
+  function savePrivacySettings(patch: Record<string, boolean>) {
+    savePreference({
+      privacy_settings: {
+        ...(prefs?.privacy_settings || {}),
+        share_location: shareLocation,
+        show_phone: showPhone,
+        show_email: showEmail,
+        ...patch,
+      },
+    });
+  }
+
+  function handleShareLocationChange(value: boolean) {
+    setShareLocation(value);
+    savePrivacySettings({ share_location: value });
+  }
+
+  function handleShowPhoneChange(value: boolean) {
+    setShowPhone(value);
+    savePrivacySettings({ show_phone: value });
+  }
+
+  function handleShowEmailChange(value: boolean) {
+    setShowEmail(value);
+    savePrivacySettings({ show_email: value });
+  }
 
   return (
     <View style={styles.sections}>
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Visibilidade</Text>
-        <ToggleRow label="Compartilhar localização" value={shareLocation} onChange={setShareLocation} />
-        <ToggleRow label="Mostrar telefone no perfil" value={showPhone} onChange={setShowPhone} />
-        <ToggleRow label="Mostrar e-mail no perfil" value={showEmail} onChange={setShowEmail} />
+        <ToggleRow label="Compartilhar localização" value={shareLocation} onChange={handleShareLocationChange} />
+        <ToggleRow label="Mostrar telefone no perfil" value={showPhone} onChange={handleShowPhoneChange} />
+        <ToggleRow label="Mostrar e-mail no perfil" value={showEmail} onChange={handleShowEmailChange} />
       </View>
 
       <View style={styles.section}>

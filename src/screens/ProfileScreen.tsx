@@ -24,7 +24,7 @@ export function ProfileScreen() {
 
   const company = user?.company;
   const profile = user?.profile;
-  const avatarUrl = getSupabaseAvatarUrl(profile?.avatar_url || company?.logo);
+  const avatarUrl = getSupabaseAvatarUrl(profile?.avatar_url || company?.logo_url);
 
   async function handleSignOut() {
     Alert.alert('Sair', 'Tem certeza que deseja sair da conta?', [
@@ -46,8 +46,6 @@ export function ProfileScreen() {
       aspect: [1, 1],
       quality: 0.5,
       base64: true,
-      width: 400,
-      height: 400,
     });
 
     if (result.canceled || !result.assets[0]?.base64) return;
@@ -67,11 +65,14 @@ export function ProfileScreen() {
 
       if (uploadError) throw uploadError;
 
-      // Atualizar profile e company com a URL
-      await Promise.all([
+      // Atualizar profile e company com a URL (companies usa logo_url, não logo)
+      const [profileUpdate, companyUpdate] = await Promise.all([
         supabase.from('profiles').update({ avatar_url: filePath }).eq('id', user?.id),
-        supabase.from('companies').update({ logo: filePath }).eq('user_id', user?.id),
+        supabase.from('companies').update({ logo_url: filePath }).eq('user_id', user?.id),
       ]);
+      if (profileUpdate.error || companyUpdate.error) {
+        throw new Error(profileUpdate.error?.message || companyUpdate.error?.message);
+      }
 
       await refreshUserData();
       showToast('Foto atualizada com sucesso!');
@@ -156,6 +157,7 @@ export function ProfileScreen() {
         {/* Settings */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Configurações</Text>
+          <SettingItem icon="key-outline" label="Alterar Senha" onPress={() => navigation.navigate('ResetPassword', { fromSettings: true })} />
           <SettingItem icon="notifications-outline" label="Notificações" onPress={() => navigation.navigate('Settings', { page: 'notifications' })} />
           <SettingItem icon="shield-outline" label="Privacidade" onPress={() => navigation.navigate('Settings', { page: 'privacy' })} />
           <SettingItem icon="help-circle-outline" label="Ajuda e Suporte" onPress={() => navigation.navigate('Settings', { page: 'help' })} />
