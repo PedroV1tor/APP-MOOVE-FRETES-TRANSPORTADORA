@@ -13,6 +13,7 @@ import { supabase } from '../lib/supabase';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { SignUpScreen } from '../screens/auth/SignUpScreen';
 import { UserTypeSelectionScreen } from '../screens/auth/UserTypeSelectionScreen';
+import { DriverSignupNavigator } from './DriverSignupNavigator';
 import { ResetPasswordScreen } from '../screens/auth/ResetPasswordScreen';
 import { AccessDeniedScreen } from '../screens/auth/AccessDeniedScreen';
 import { HomeScreen } from '../screens/HomeScreen';
@@ -250,6 +251,7 @@ export function AppNavigator() {
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="UserTypeSelection" component={UserTypeSelectionScreen} />
             <Stack.Screen name="SignUp" component={SignUpScreen} />
+            <Stack.Screen name="DriverSignup" component={DriverSignupNavigator} />
             <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
           </>
         )}

@@ -70,6 +70,29 @@ export const BODY_TYPES_SPECIAL = [
   'Hopper',
 ];
 
+export const VEHICLE_TYPE_GROUPS: { label: string; options: string[] }[] = [
+  { label: 'Pesados', options: VEHICLE_TYPES_HEAVY },
+  { label: 'Médios', options: VEHICLE_TYPES_MEDIUM },
+  { label: 'Leves', options: VEHICLE_TYPES_LIGHT },
+];
+
+export const BODY_TYPE_GROUPS: { label: string; options: string[] }[] = [
+  { label: 'Fechadas', options: BODY_TYPES_CLOSED },
+  { label: 'Abertas', options: BODY_TYPES_OPEN },
+  { label: 'Especiais', options: BODY_TYPES_SPECIAL },
+];
+
+export const TRACKER_OPTIONS = [
+  'Não tem rastreador',
+  'Tem, mas não sei a marca',
+  'Autotrac',
+  'Omnilink',
+  'Onix Sat',
+  'Positron',
+  'Sascar',
+  'Porto Seguro',
+];
+
 export const FREIGHT_STATUS_LABELS: Record<string, string> = {
   draft: 'Rascunho',
   active: 'Disponível',

@@ -12,6 +12,10 @@ export function UserTypeSelectionScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
 
   function choose(userType: 'caminhoneiro' | 'transportadora') {
+    if (userType === 'caminhoneiro') {
+      navigation.navigate('DriverSignup');
+      return;
+    }
     navigation.navigate('SignUp', { userType });
   }
 

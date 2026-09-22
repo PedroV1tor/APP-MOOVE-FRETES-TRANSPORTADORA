@@ -580,6 +580,7 @@ export type Database = {
           rntrc_expiry: string | null
           rntrc_status: string
           specializations: string[] | null
+          tracker_type: string | null
           trailer_type: string | null
           updated_at: string
           user_id: string
@@ -621,6 +622,7 @@ export type Database = {
           rntrc_expiry?: string | null
           rntrc_status?: string
           specializations?: string[] | null
+          tracker_type?: string | null
           trailer_type?: string | null
           updated_at?: string
           user_id: string
@@ -662,6 +664,7 @@ export type Database = {
           rntrc_expiry?: string | null
           rntrc_status?: string
           specializations?: string[] | null
+          tracker_type?: string | null
           trailer_type?: string | null
           updated_at?: string
           user_id?: string
